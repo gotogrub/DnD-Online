@@ -1,0 +1,25 @@
+extends RefCounted
+class_name NetMessages
+## Defines network message names used by future client intents and server broadcasts.
+
+const C2S_JOIN_REQUEST := "c2s_join_request"
+const S2C_JOIN_ACCEPTED := "s2c_join_accepted"
+const S2C_PLAYER_JOINED := "s2c_player_joined"
+const S2C_PLAYER_LEFT := "s2c_player_left"
+const C2S_CHAT_SEND := "c2s_chat_send"
+const S2C_CHAT_MESSAGE := "s2c_chat_message"
+const C2S_MOVE_REQUEST := "c2s_move_request"
+const S2C_MOVE_REJECTED := "s2c_move_rejected"
+const S2C_ACTOR_MOVED := "s2c_actor_moved"
+const S2C_ACTOR_SPAWNED := "s2c_actor_spawned"
+const S2C_ACTOR_REMOVED := "s2c_actor_removed"
+const C2S_GM_SPAWN_NPC := "c2s_gm_spawn_npc"
+const C2S_GM_MOVE_ACTOR := "c2s_gm_move_actor"
+const C2S_ROLL_REQUEST := "c2s_roll_request"
+const S2C_ROLL_RESULT := "s2c_roll_result"
+const C2S_ENCOUNTER_COMMAND := "c2s_encounter_command"
+const S2C_ENCOUNTER_STATE := "s2c_encounter_state"
+const S2C_STATE_SNAPSHOT := "s2c_state_snapshot"
+const S2C_STATE_DELTA := "s2c_state_delta"
+const C2S_PING := "c2s_ping"
+const S2C_PONG := "s2c_pong"

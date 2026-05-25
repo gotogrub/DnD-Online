@@ -1,0 +1,27 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/EncounterPanel.gd" id="1_script"]
+
+[node name="EncounterPanel" type="PanelContainer"]
+offset_right = 360.0
+offset_bottom = 160.0
+script = ExtResource("1_script")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="RoundLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Round: -"
+
+[node name="TurnLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Turn: -"
+
+[node name="ApLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "AP: -"
+
+[node name="NextTurnButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Next"

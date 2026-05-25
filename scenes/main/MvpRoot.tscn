@@ -1,0 +1,26 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/world/ProtoBoard.tscn" id="1_board"]
+[ext_resource type="PackedScene" path="res://scenes/ui/ConnectPanel.tscn" id="2_connect"]
+[ext_resource type="PackedScene" path="res://scenes/ui/ChatPanel.tscn" id="3_chat"]
+[ext_resource type="PackedScene" path="res://scenes/ui/EncounterPanel.tscn" id="4_encounter"]
+[ext_resource type="Script" path="res://scripts/world/MvpRoot.gd" id="5_script"]
+
+[node name="MvpRoot" type="Node"]
+script = ExtResource("5_script")
+
+[node name="ProtoBoard" parent="." instance=ExtResource("1_board")]
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="ConnectPanel" parent="UI" instance=ExtResource("2_connect")]
+
+[node name="ChatPanel" parent="UI" instance=ExtResource("3_chat")]
+offset_top = 716.0
+offset_right = 480.0
+offset_bottom = 1080.0
+
+[node name="EncounterPanel" parent="UI" instance=ExtResource("4_encounter")]
+offset_left = 1520.0
+offset_right = 1920.0
+offset_bottom = 180.0
