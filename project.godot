@@ -26,6 +26,7 @@ SessionState="*res://scripts/autoload/SessionState.gd"
 TileRules="*res://scripts/autoload/TileRules.gd"
 CommandRouter="*res://scripts/autoload/CommandRouter.gd"
 DiceRoller="*res://scripts/autoload/DiceRoller.gd"
+GMToolState="*res://scripts/autoload/GMToolState.gd"
 
 [display]
 

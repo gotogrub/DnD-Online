@@ -68,6 +68,8 @@ func _handle_click_actor_debug(world_pos: Vector2) -> void:
 		print("is_walkable: ", walkable)
 		print("is_occupied: ", occupied)
 		print("selected_actor_id: ", selected_actor_id)
+	if _handle_gm_tool_click(tile):
+		return
 	if SessionState.is_network_mode:
 		NetworkService.request_move(selected_actor_id, tile)
 		return
@@ -79,6 +81,23 @@ func _handle_click_actor_debug(world_pos: Vector2) -> void:
 	var moved := SessionState.move_actor(selected_actor_id, tile)
 	if click_debug_enabled:
 		print("move_actor: ", moved)
+
+
+func _handle_gm_tool_click(tile: Vector2i) -> bool:
+	if not SessionState.is_network_mode:
+		return false
+	if SessionState.local_role != MvpConstants.ROLE_GM:
+		return false
+	if not GMToolState.is_gm_spawn_mode_active():
+		return false
+	var requested: bool = NetworkService.request_gm_spawn_npc(
+		GMToolState.get_selected_npc_type(),
+		GMToolState.get_selected_npc_name(),
+		tile
+	)
+	if requested:
+		GMToolState.clear_gm_tool()
+	return true
 
 
 func _setup_world_renderer() -> void:

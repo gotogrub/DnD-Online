@@ -21,6 +21,7 @@ var is_network_mode := false
 var encounter := {}
 var map_id := ""
 var chat_log: Array = []
+var actor_sequence := 0
 
 
 func reset() -> void:
@@ -36,6 +37,7 @@ func reset_all() -> void:
 	local_role = ""
 	local_actor_id = ""
 	is_network_mode = false
+	actor_sequence = 0
 	chat_log.clear()
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	encounter = _default_encounter()
@@ -107,6 +109,38 @@ func create_actor(actor_id: String, kind: String, actor_name: String, tile: Vect
 	)
 	actors[actor_id] = actor.duplicate(true)
 	actor_changed.emit(actor_id)
+	actors_changed.emit()
+	state_changed.emit()
+	return actor.duplicate(true)
+
+
+func generate_actor_id(prefix: String = "actor_npc") -> String:
+	actor_sequence += 1
+	var candidate: String = "%s_%d" % [prefix, actor_sequence]
+	while actors.has(candidate):
+		actor_sequence += 1
+		candidate = "%s_%d" % [prefix, actor_sequence]
+	return candidate
+
+
+func create_npc_actor(npc_type: String, actor_name: String, tile: Vector2i, template: Dictionary) -> Dictionary:
+	var safe_type: String = npc_type.strip_edges().to_lower()
+	if safe_type.is_empty():
+		safe_type = "npc"
+	var max_ap: int = int(template.get(EntityData.MAX_AP, template.get("max_ap", MvpConstants.DEFAULT_MAX_AP)))
+	var actor: Dictionary = EntityData.make_actor(
+		generate_actor_id("actor_npc_%s" % safe_type),
+		MvpConstants.ACTOR_KIND_NPC,
+		0,
+		actor_name,
+		tile,
+		_resolve_actor_sprite(MvpConstants.ACTOR_KIND_NPC, str(template.get(EntityData.SPRITE, template.get("sprite", "npc")))),
+		max_ap,
+		bool(template.get(EntityData.BLOCKS_TILE, template.get("blocks_tile", true)))
+	)
+	actor[EntityData.AP] = int(template.get(EntityData.AP, template.get("ap", max_ap)))
+	actors[str(actor.get(EntityData.ACTOR_ID, ""))] = actor.duplicate(true)
+	actor_changed.emit(str(actor.get(EntityData.ACTOR_ID, "")))
 	actors_changed.emit()
 	state_changed.emit()
 	return actor.duplicate(true)

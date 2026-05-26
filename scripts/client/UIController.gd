@@ -11,6 +11,7 @@ var ui_root: Node
 var connect_panel: Node
 var chat_panel: Node
 var encounter_panel: Node
+var gm_panel: Node
 var debug_status: Label
 var roll_toast_scene := preload("res://scenes/ui/RollToast.tscn")
 var ui_state := STATE_OFFLINE
@@ -25,6 +26,7 @@ func bind_ui(root: Node) -> void:
 	connect_panel = root.get_node_or_null("ConnectPanel")
 	chat_panel = root.get_node_or_null("ChatPanel")
 	encounter_panel = root.get_node_or_null("EncounterPanel")
+	gm_panel = root.get_node_or_null("GMPanel")
 	debug_status = root.get_node_or_null("DebugStatus") as Label
 	_connect_network_signals()
 	_set_ui_state(STATE_OFFLINE)
@@ -84,6 +86,12 @@ func _set_ui_state(new_state: String) -> void:
 			encounter_panel.set_encounter_visible(encounter_visible)
 		else:
 			encounter_panel.visible = encounter_visible
+	if gm_panel:
+		var gm_visible: bool = connected_like and player_role == MvpConstants.ROLE_GM
+		if gm_panel.has_method("set_gm_visible"):
+			gm_panel.set_gm_visible(gm_visible)
+		else:
+			gm_panel.visible = gm_visible
 	_update_debug_status()
 
 

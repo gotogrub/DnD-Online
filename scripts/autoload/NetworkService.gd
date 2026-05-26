@@ -17,6 +17,37 @@ signal move_rejected(payload: Dictionary)
 signal chat_message_received(payload: Dictionary)
 signal system_message_received(payload: Dictionary)
 
+const NPC_TYPES := {
+	"goblin": {
+		"name": "Goblin",
+		"sprite": "npc",
+		"ap": 6,
+		"max_ap": 6,
+		"blocks_tile": true,
+	},
+	"raider": {
+		"name": "Raider",
+		"sprite": "npc",
+		"ap": 6,
+		"max_ap": 6,
+		"blocks_tile": true,
+	},
+	"guard": {
+		"name": "Guard",
+		"sprite": "npc",
+		"ap": 6,
+		"max_ap": 6,
+		"blocks_tile": true,
+	},
+	"merchant": {
+		"name": "Merchant",
+		"sprite": "npc",
+		"ap": 6,
+		"max_ap": 6,
+		"blocks_tile": true,
+	},
+}
+
 var is_server := false
 var is_connected := false
 var local_peer_id := 0
@@ -152,6 +183,27 @@ func request_chat_message(message: String) -> bool:
 		c2s_chat_send(clean_message)
 	else:
 		c2s_chat_send.rpc_id(1, clean_message)
+	return true
+
+
+func request_gm_spawn_npc(npc_type: String, npc_name: String, tile: Vector2i) -> bool:
+	if not SessionState.is_network_mode:
+		print("spawn npc request ignored: not in network mode")
+		return false
+	var payload: Dictionary = {
+		"npc_type": _normalize_npc_type(npc_type),
+		"npc_name": npc_name.strip_edges().substr(0, MvpConstants.MAX_NAME_LENGTH),
+		"tile": tile,
+	}
+	print("spawn npc request: type=%s name=%s tile=%s" % [
+		str(payload.get("npc_type", "")),
+		str(payload.get("npc_name", "")),
+		str(tile),
+	])
+	if is_network_server():
+		c2s_gm_spawn_npc(payload)
+	else:
+		c2s_gm_spawn_npc.rpc_id(1, payload)
 	return true
 
 
@@ -359,6 +411,11 @@ func _send_chat_rejected(peer_id: int, reason: String) -> void:
 	_send_system_message(peer_id, "chat rejected: %s" % reason)
 
 
+func _send_spawn_rejected(peer_id: int, reason: String) -> void:
+	print("spawn rejected: peer=%d reason=%s" % [peer_id, reason])
+	_send_system_message(peer_id, "Spawn rejected: %s" % reason)
+
+
 func _lock_actor_movement(actor_id: String, step_count: int) -> void:
 	if actor_id.is_empty():
 		return
@@ -503,6 +560,35 @@ func _sanitize_chat_message(message: String) -> String:
 	return clean_message
 
 
+func _normalize_npc_type(npc_type: String) -> String:
+	var normalized: String = npc_type.strip_edges().to_lower()
+	if normalized.is_empty():
+		normalized = "goblin"
+	return normalized
+
+
+func _normalize_actor_name(actor_name: String, fallback: String) -> String:
+	var normalized: String = actor_name.strip_edges()
+	if normalized.is_empty():
+		normalized = fallback
+	return normalized.substr(0, MvpConstants.MAX_NAME_LENGTH)
+
+
+func _validate_gm_spawn_request(peer_id: int, npc_type: String, tile: Vector2i) -> Dictionary:
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty() or str(player.get(EntityData.ROLE, "")) != MvpConstants.ROLE_GM:
+		return {"ok": false, "reason": "gm role required"}
+	if not NPC_TYPES.has(npc_type):
+		return {"ok": false, "reason": "invalid npc type"}
+	if not TileRules.has_tile(tile):
+		return {"ok": false, "reason": "tile does not exist"}
+	if not TileRules.is_walkable(tile):
+		return {"ok": false, "reason": "tile not walkable"}
+	if TileRules.is_occupied(tile):
+		return {"ok": false, "reason": "tile occupied"}
+	return {"ok": true, "reason": ""}
+
+
 func _system_payload(text: String) -> Dictionary:
 	return {
 		"kind": "system",
@@ -604,6 +690,40 @@ func c2s_move_request(payload: Dictionary) -> void:
 		"cost": cost,
 		"client_seq": client_seq,
 	})
+
+
+@rpc("any_peer", "reliable")
+func c2s_gm_spawn_npc(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var npc_type: String = _normalize_npc_type(str(payload.get("npc_type", "")))
+	var tile: Vector2i = _as_vector2i(payload.get("tile", Vector2i.ZERO))
+	print("spawn npc request received: peer=%d type=%s tile=%s" % [
+		peer_id,
+		npc_type,
+		str(tile),
+	])
+	var validation: Dictionary = _validate_gm_spawn_request(peer_id, npc_type, tile)
+	if not bool(validation.get("ok", false)):
+		_send_spawn_rejected(peer_id, str(validation.get("reason", "invalid request")))
+		return
+	var template: Dictionary = NPC_TYPES.get(npc_type, {}) as Dictionary
+	var npc_name: String = _normalize_actor_name(str(payload.get("npc_name", "")), str(template.get("name", "NPC")))
+	var actor: Dictionary = SessionState.create_npc_actor(npc_type, npc_name, tile, template)
+	if actor.is_empty():
+		_send_spawn_rejected(peer_id, "invalid request")
+		return
+	print("npc spawned: peer=%d actor=%s name=%s tile=%s" % [
+		peer_id,
+		str(actor.get(EntityData.ACTOR_ID, "")),
+		str(actor.get(EntityData.NAME, "")),
+		str(tile),
+	])
+	_send_system_message(peer_id, "Spawned %s at %s" % [str(actor.get(EntityData.NAME, "NPC")), str(tile)])
+	_broadcast_snapshot()
 
 
 @rpc("authority", "reliable")
