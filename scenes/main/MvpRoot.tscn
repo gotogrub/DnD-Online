@@ -29,8 +29,8 @@ offset_bottom = -8.0
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 496.0
-offset_top = -52.0
-offset_right = 784.0
+offset_top = -260.0
+offset_right = 552.0
 offset_bottom = -8.0
 
 [node name="EncounterPanel" parent="UI" instance=ExtResource("4_encounter")]
