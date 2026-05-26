@@ -16,6 +16,7 @@ signal actor_moved_received(payload: Dictionary)
 signal move_rejected(payload: Dictionary)
 signal chat_message_received(payload: Dictionary)
 signal system_message_received(payload: Dictionary)
+signal roll_result_received(payload: Dictionary)
 
 const NPC_TYPES := {
 	"goblin": {
@@ -183,6 +184,26 @@ func request_chat_message(message: String) -> bool:
 		c2s_chat_send(clean_message)
 	else:
 		c2s_chat_send.rpc_id(1, clean_message)
+	return true
+
+
+func request_roll(expr: String) -> bool:
+	var clean_expr: String = expr.strip_edges()
+	if clean_expr.is_empty():
+		print("roll ignored: empty expression")
+		return false
+	if not SessionState.is_network_mode:
+		var payload: Dictionary = _system_payload("roll requires network session")
+		system_message_received.emit(payload)
+		return false
+	var request_payload: Dictionary = {
+		"expr": clean_expr,
+		"visibility": "public",
+	}
+	if is_network_server():
+		c2s_roll_request(request_payload)
+	else:
+		c2s_roll_request.rpc_id(1, request_payload)
 	return true
 
 
@@ -386,6 +407,21 @@ func _broadcast_chat_message(payload: Dictionary) -> void:
 		s2c_chat_message.rpc_id(target_peer_id, payload)
 
 
+func _broadcast_roll_result(payload: Dictionary) -> void:
+	print("broadcast roll result: peer=%d name=%s expr=%s total=%d" % [
+		int(payload.get("peer_id", 0)),
+		str(payload.get("name", "")),
+		str(payload.get("normalized_expr", "")),
+		int(payload.get("total", 0)),
+	])
+	s2c_roll_result(payload)
+	for peer_id in players_by_peer_id.keys():
+		var target_peer_id := int(peer_id)
+		if target_peer_id == local_peer_id:
+			continue
+		s2c_roll_result.rpc_id(target_peer_id, payload)
+
+
 func _send_system_message(peer_id: int, text: String) -> void:
 	if peer_id == local_peer_id:
 		s2c_system_message(text)
@@ -409,6 +445,11 @@ func _send_move_rejected(peer_id: int, payload: Dictionary) -> void:
 func _send_chat_rejected(peer_id: int, reason: String) -> void:
 	print("chat rejected: peer=%d reason=%s" % [peer_id, reason])
 	_send_system_message(peer_id, "chat rejected: %s" % reason)
+
+
+func _send_roll_rejected(peer_id: int, reason: String) -> void:
+	print("roll rejected: peer=%d reason=%s" % [peer_id, reason])
+	_send_system_message(peer_id, "Roll rejected: %s" % reason)
 
 
 func _send_spawn_rejected(peer_id: int, reason: String) -> void:
@@ -560,6 +601,50 @@ func _sanitize_chat_message(message: String) -> String:
 	return clean_message
 
 
+func _handle_chat_command(peer_id: int, message: String) -> bool:
+	if not message.begins_with("/"):
+		return false
+	var command: String = message
+	var args: String = ""
+	var split_index: int = message.find(" ")
+	if split_index != -1:
+		command = message.substr(0, split_index)
+		args = message.substr(split_index + 1).strip_edges()
+	command = command.to_lower()
+	match command:
+		"/roll", "/r":
+			_handle_roll_request(peer_id, args)
+			return true
+		_:
+			_send_system_message(peer_id, "Unknown command")
+			return true
+
+
+func _handle_roll_request(peer_id: int, expr: String) -> void:
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty():
+		_send_roll_rejected(peer_id, "peer is not registered")
+		return
+	var result: Dictionary = DiceRoller.roll_expression(expr, str(player.get(EntityData.PLAYER_ID, "")))
+	if not bool(result.get("ok", false)):
+		_send_roll_rejected(peer_id, str(result.get("error", "invalid expression")))
+		return
+	var payload: Dictionary = {
+		"kind": "roll",
+		"peer_id": peer_id,
+		"player_id": str(player.get(EntityData.PLAYER_ID, "")),
+		"name": str(player.get(EntityData.NAME, "Player")),
+		"role": str(player.get(EntityData.ROLE, MvpConstants.ROLE_PLAYER)),
+		"expr": expr.strip_edges(),
+		"normalized_expr": str(result.get("normalized_expr", "")),
+		"rolls": result.get("rolls", []),
+		"modifier": int(result.get("modifier", 0)),
+		"total": int(result.get("total", 0)),
+		"server_time": Time.get_unix_time_from_system(),
+	}
+	_broadcast_roll_result(payload)
+
+
 func _normalize_npc_type(npc_type: String) -> String:
 	var normalized: String = npc_type.strip_edges().to_lower()
 	if normalized.is_empty():
@@ -629,6 +714,8 @@ func c2s_chat_send(message: String) -> void:
 	if clean_message.is_empty():
 		_send_chat_rejected(peer_id, "empty message")
 		return
+	if _handle_chat_command(peer_id, clean_message):
+		return
 	var player: Dictionary = SessionState.get_player(peer_id)
 	if player.is_empty():
 		_send_chat_rejected(peer_id, "peer is not registered")
@@ -648,6 +735,18 @@ func c2s_chat_send(message: String) -> void:
 		clean_message,
 	])
 	_broadcast_chat_message(payload)
+
+
+@rpc("any_peer", "reliable")
+func c2s_roll_request(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var expr: String = str(payload.get("expr", ""))
+	print("roll request received: peer=%d expr=%s" % [peer_id, expr])
+	_handle_roll_request(peer_id, expr)
 
 
 @rpc("any_peer", "reliable")
@@ -756,6 +855,17 @@ func s2c_chat_message(payload: Dictionary) -> void:
 	])
 	SessionState.add_chat_message(payload.duplicate(true))
 	chat_message_received.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_roll_result(payload: Dictionary) -> void:
+	print("roll result: %s rolled %s total=%d" % [
+		str(payload.get("name", "Player")),
+		str(payload.get("normalized_expr", "")),
+		int(payload.get("total", 0)),
+	])
+	SessionState.add_chat_message(payload.duplicate(true))
+	roll_result_received.emit(payload.duplicate(true))
 
 
 @rpc("authority", "reliable")

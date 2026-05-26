@@ -17,6 +17,7 @@ func _ready() -> void:
 	NetworkService.move_rejected.connect(_on_move_rejected)
 	NetworkService.chat_message_received.connect(_on_chat_message_received)
 	NetworkService.system_message_received.connect(_on_system_message_received)
+	NetworkService.roll_result_received.connect(_on_roll_result_received)
 	messages.scroll_following = true
 
 
@@ -30,6 +31,9 @@ func append_message(message: Dictionary) -> void:
 			messages.add_text("%s: %s\n" % [sender, text])
 		else:
 			messages.add_text("%s (%s): %s\n" % [sender, role, text])
+		return
+	if kind == "roll":
+		messages.add_text("%s\n" % _format_roll_message(message))
 		return
 	var system_text: String = _clean_display_text(str(message.get("message", message.get("text", ""))))
 	messages.add_text("[system] %s\n" % system_text)
@@ -76,6 +80,34 @@ func _on_chat_message_received(payload: Dictionary) -> void:
 
 func _on_system_message_received(payload: Dictionary) -> void:
 	append_message(payload)
+
+
+func _on_roll_result_received(payload: Dictionary) -> void:
+	append_message(payload)
+
+
+func _format_roll_message(message: Dictionary) -> String:
+	var sender: String = _clean_display_text(str(message.get("name", "Player")))
+	var expr: String = _clean_display_text(str(message.get("normalized_expr", message.get("expr", ""))))
+	var rolls: Array = message.get("rolls", [])
+	var roll_text: String = ""
+	for index in range(rolls.size()):
+		if index > 0:
+			roll_text += ", "
+		roll_text += str(int(rolls[index]))
+	var modifier: int = int(message.get("modifier", 0))
+	var modifier_text: String = ""
+	if modifier > 0:
+		modifier_text = " + %d" % modifier
+	elif modifier < 0:
+		modifier_text = " - %d" % abs(modifier)
+	return "[roll] %s rolled %s: [%s]%s = %d" % [
+		sender,
+		expr,
+		roll_text,
+		modifier_text,
+		int(message.get("total", 0)),
+	]
 
 
 func _clean_display_text(text: String) -> String:

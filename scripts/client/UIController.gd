@@ -10,6 +10,7 @@ const STATE_IN_ENCOUNTER := "in_encounter"
 var ui_root: Node
 var connect_panel: Node
 var chat_panel: Node
+var dice_panel: Node
 var encounter_panel: Node
 var gm_panel: Node
 var debug_status: Label
@@ -25,6 +26,7 @@ func bind_ui(root: Node) -> void:
 	ui_root = root
 	connect_panel = root.get_node_or_null("ConnectPanel")
 	chat_panel = root.get_node_or_null("ChatPanel")
+	dice_panel = root.get_node_or_null("DicePanel")
 	encounter_panel = root.get_node_or_null("EncounterPanel")
 	gm_panel = root.get_node_or_null("GMPanel")
 	debug_status = root.get_node_or_null("DebugStatus") as Label
@@ -80,6 +82,8 @@ func _set_ui_state(new_state: String) -> void:
 			connect_panel.set_collapsed(connected_like)
 	if chat_panel:
 		chat_panel.visible = connected_like
+	if dice_panel:
+		dice_panel.visible = connected_like
 	if encounter_panel:
 		var encounter_visible := new_state == STATE_IN_ENCOUNTER
 		if encounter_panel.has_method("set_encounter_visible"):

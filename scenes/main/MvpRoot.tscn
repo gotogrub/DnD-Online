@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/ProtoBoard.tscn" id="1_board"]
 [ext_resource type="PackedScene" path="res://scenes/ui/ConnectPanel.tscn" id="2_connect"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/EncounterPanel.tscn" id="4_encounter"]
 [ext_resource type="Script" path="res://scripts/world/MvpRoot.gd" id="5_script"]
 [ext_resource type="PackedScene" path="res://scenes/ui/GMPanel.tscn" id="6_gm_panel"]
+[ext_resource type="PackedScene" path="res://scenes/ui/DicePanel.tscn" id="7_dice_panel"]
 
 [node name="MvpRoot" type="Node"]
 script = ExtResource("5_script")
@@ -22,6 +23,14 @@ anchor_bottom = 1.0
 offset_left = 8.0
 offset_top = -316.0
 offset_right = 488.0
+offset_bottom = -8.0
+
+[node name="DicePanel" parent="UI" instance=ExtResource("7_dice_panel")]
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 496.0
+offset_top = -52.0
+offset_right = 784.0
 offset_bottom = -8.0
 
 [node name="EncounterPanel" parent="UI" instance=ExtResource("4_encounter")]

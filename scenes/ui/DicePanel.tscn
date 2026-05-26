@@ -1,0 +1,43 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/DicePanel.gd" id="1_script"]
+
+[node name="DicePanel" type="PanelContainer"]
+visible = false
+custom_minimum_size = Vector2(288, 44)
+offset_right = 288.0
+offset_bottom = 44.0
+script = ExtResource("1_script")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="D4Button" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(48, 36)
+layout_mode = 2
+tooltip_text = "Roll 1d4"
+text = "d4"
+
+[node name="D6Button" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(48, 36)
+layout_mode = 2
+tooltip_text = "Roll 1d6"
+text = "d6"
+
+[node name="D8Button" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(48, 36)
+layout_mode = 2
+tooltip_text = "Roll 1d8"
+text = "d8"
+
+[node name="D12Button" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(52, 36)
+layout_mode = 2
+tooltip_text = "Roll 1d12"
+text = "d12"
+
+[node name="D20Button" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(52, 36)
+layout_mode = 2
+tooltip_text = "Roll 1d20"
+text = "d20"
