@@ -52,8 +52,10 @@ func is_walkable(tile: Vector2i) -> bool:
 	return not _has_blocking_layer1_tile(tile)
 
 
-func is_occupied(tile: Vector2i) -> bool:
-	for actor in SessionState.actors.values():
+func is_occupied(tile: Vector2i, ignore_actor_id := "") -> bool:
+	for actor in SessionState.get_actors().values():
+		if str(actor.get(EntityData.ACTOR_ID, "")) == ignore_actor_id:
+			continue
 		if not bool(actor.get(EntityData.BLOCKS_TILE, true)):
 			continue
 		if actor.get(EntityData.TILE, Vector2i.ZERO) == tile:
@@ -112,11 +114,4 @@ func _has_blocking_layer1_tile(tile: Vector2i) -> bool:
 
 
 func _tile_is_occupied_by_other(tile: Vector2i, ignore_actor_id: String) -> bool:
-	for actor in SessionState.actors.values():
-		if str(actor.get(EntityData.ACTOR_ID, "")) == ignore_actor_id:
-			continue
-		if not bool(actor.get(EntityData.BLOCKS_TILE, true)):
-			continue
-		if actor.get(EntityData.TILE, Vector2i.ZERO) == tile:
-			return true
-	return false
+	return is_occupied(tile, ignore_actor_id)

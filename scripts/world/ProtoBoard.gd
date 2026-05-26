@@ -4,29 +4,26 @@ class_name ProtoBoard
 
 signal tile_clicked(tile: Vector2i)
 
-@export var smoke_test_tile := Vector2i(5, 5)
-@export var smoke_token_scene: PackedScene
-@export var spawn_smoke_token := true
+@export var local_actor_debug_enabled := true
 @export var click_debug_enabled := true
-@export_range(0.0, 0.15, 0.01) var smoke_move_seconds := 0.12
 
 @onready var layer0: TileMapLayer = $Layer0
 @onready var layer1: TileMapLayer = $Layer1
 @onready var tokens: Node2D = $Tokens
 
-var smoke_token: Node2D
-var smoke_move_tween: Tween
+var world_renderer: WorldRenderer
 
 
 func _ready() -> void:
 	TileRules.bind_board(self)
-	if spawn_smoke_token:
-		_spawn_smoke_token()
+	_setup_world_renderer()
+	if local_actor_debug_enabled:
+		_setup_local_debug_state()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_handle_click_smoke_test(get_global_mouse_position())
+		_handle_click_actor_debug(get_global_mouse_position())
 
 
 func get_layer0() -> TileMapLayer:
@@ -53,52 +50,47 @@ func get_tokens_root() -> Node2D:
 	return tokens
 
 
-func _spawn_smoke_token() -> void:
-	if not smoke_token_scene:
-		return
-	var token := smoke_token_scene.instantiate()
-	smoke_token = token as Node2D
-	if not smoke_token:
-		token.queue_free()
-		return
-	token.name = "SmokeToken"
-	tokens.add_child(token)
-	if token.has_method("apply_actor_data"):
-		token.apply_actor_data({
-			EntityData.ACTOR_ID: "smoke_token",
-			EntityData.NAME: "Token",
-			EntityData.KIND: MvpConstants.ACTOR_KIND_PLAYER,
-			EntityData.TILE: smoke_test_tile,
-			EntityData.SPRITE: MvpConstants.DEFAULT_PLAYER_SPRITE,
-		})
-	else:
-		token.global_position = tile_to_world(smoke_test_tile)
+func get_world_renderer() -> WorldRenderer:
+	return world_renderer
 
 
-func _handle_click_smoke_test(world_pos: Vector2) -> void:
+func _handle_click_actor_debug(world_pos: Vector2) -> void:
 	var tile := world_to_tile(world_pos)
 	var tile_exists := has_tile(tile)
 	var walkable := tile_exists and TileRules.is_walkable(tile)
+	var selected_actor_id := SessionState.selected_actor_id
+	var occupied := tile_exists and TileRules.is_occupied(tile, selected_actor_id)
+	var can_move := walkable and not occupied and not selected_actor_id.is_empty()
 	if click_debug_enabled:
 		print("clicked world_pos: ", world_pos)
 		print("clicked tile: ", tile)
 		print("has_tile: ", tile_exists)
 		print("is_walkable: ", walkable)
+		print("is_occupied: ", occupied)
+		print("selected_actor_id: ", selected_actor_id)
 	tile_clicked.emit(tile)
-	if walkable:
-		_move_smoke_token_to_tile(tile)
+	if not can_move:
+		if click_debug_enabled:
+			print("move_actor: false")
+		return
+	var moved := SessionState.move_actor(selected_actor_id, tile)
+	if click_debug_enabled:
+		print("move_actor: ", moved)
 
 
-func _move_smoke_token_to_tile(tile: Vector2i) -> void:
-	if not is_instance_valid(smoke_token):
-		_spawn_smoke_token()
-	if not is_instance_valid(smoke_token):
+func _setup_world_renderer() -> void:
+	if world_renderer:
 		return
-	var target_position := tile_to_world(tile)
-	if smoke_move_tween and smoke_move_tween.is_valid():
-		smoke_move_tween.kill()
-	if smoke_move_seconds <= 0.0:
-		smoke_token.global_position = target_position
-		return
-	smoke_move_tween = create_tween()
-	smoke_move_tween.tween_property(smoke_token, "global_position", target_position, smoke_move_seconds)
+	world_renderer = WorldRenderer.new()
+	world_renderer.name = "WorldRenderer"
+	add_child(world_renderer)
+	world_renderer.bind_board(self)
+
+
+func _setup_local_debug_state() -> void:
+	SessionState.reset_local_debug_state()
+	SessionState.create_actor("actor_player_1", MvpConstants.ACTOR_KIND_PLAYER, "Player", Vector2i(-2, 7), "player", true)
+	SessionState.create_actor("actor_npc_1", MvpConstants.ACTOR_KIND_NPC, "Goblin", Vector2i(-5, 7), "npc", true)
+	SessionState.selected_actor_id = "actor_player_1"
+	if world_renderer:
+		world_renderer.render_full_state(SessionState.get_actors())
