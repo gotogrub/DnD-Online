@@ -14,6 +14,8 @@ signal intent_submitted(message_type: String, payload: Dictionary)
 signal snapshot_received(snapshot: Dictionary)
 signal actor_moved_received(payload: Dictionary)
 signal move_rejected(payload: Dictionary)
+signal chat_message_received(payload: Dictionary)
+signal system_message_received(payload: Dictionary)
 
 var is_server := false
 var is_connected := false
@@ -24,6 +26,7 @@ var server_port := MvpConstants.DEFAULT_PORT
 var player_name := ""
 var players_by_peer_id := {}
 var client_move_seq := 0
+var moving_actor_ids := {}
 
 
 func start_server(port: int) -> bool:
@@ -119,6 +122,22 @@ func request_move(actor_id: String, to_tile: Vector2i) -> bool:
 	return true
 
 
+func request_chat_message(message: String) -> bool:
+	var clean_message: String = _sanitize_chat_message(message)
+	if clean_message.is_empty():
+		print("chat ignored: empty message")
+		return false
+	if not SessionState.is_network_mode:
+		var payload: Dictionary = _system_payload("chat requires network session")
+		system_message_received.emit(payload)
+		return false
+	if is_network_server():
+		c2s_chat_send(clean_message)
+	else:
+		c2s_chat_send.rpc_id(1, clean_message)
+	return true
+
+
 func _connect_multiplayer_signals() -> void:
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
@@ -141,6 +160,7 @@ func _disconnect_peer() -> void:
 	local_peer_id = 0
 	players_by_peer_id.clear()
 	client_move_seq = 0
+	moving_actor_ids.clear()
 
 
 func _on_peer_connected(peer_id: int) -> void:
@@ -282,6 +302,27 @@ func _broadcast_actor_moved(payload: Dictionary) -> void:
 		s2c_actor_moved.rpc_id(target_peer_id, payload)
 
 
+func _broadcast_chat_message(payload: Dictionary) -> void:
+	print("broadcast chat message: peer=%d name=%s message=%s" % [
+		int(payload.get("peer_id", 0)),
+		str(payload.get("name", "")),
+		str(payload.get("message", "")),
+	])
+	s2c_chat_message(payload)
+	for peer_id in players_by_peer_id.keys():
+		var target_peer_id := int(peer_id)
+		if target_peer_id == local_peer_id:
+			continue
+		s2c_chat_message.rpc_id(target_peer_id, payload)
+
+
+func _send_system_message(peer_id: int, text: String) -> void:
+	if peer_id == local_peer_id:
+		s2c_system_message(text)
+	else:
+		s2c_system_message.rpc_id(peer_id, text)
+
+
 func _send_move_rejected(peer_id: int, payload: Dictionary) -> void:
 	print("move rejected: peer=%d actor=%s reason=%s" % [
 		peer_id,
@@ -294,6 +335,24 @@ func _send_move_rejected(peer_id: int, payload: Dictionary) -> void:
 		s2c_move_rejected.rpc_id(peer_id, payload)
 
 
+func _send_chat_rejected(peer_id: int, reason: String) -> void:
+	print("chat rejected: peer=%d reason=%s" % [peer_id, reason])
+	_send_system_message(peer_id, "chat rejected: %s" % reason)
+
+
+func _lock_actor_movement(actor_id: String, step_count: int) -> void:
+	if actor_id.is_empty():
+		return
+	moving_actor_ids[actor_id] = true
+	var duration: float = max(float(step_count) * 0.12 + 0.05, 0.17)
+	var timer: SceneTreeTimer = get_tree().create_timer(duration)
+	timer.timeout.connect(_clear_actor_movement_lock.bind(actor_id))
+
+
+func _clear_actor_movement_lock(actor_id: String) -> void:
+	moving_actor_ids.erase(actor_id)
+
+
 func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -> Dictionary:
 	var actor: Dictionary = SessionState.get_actor(actor_id)
 	var authoritative_tile: Vector2i = _actor_tile(actor)
@@ -303,6 +362,8 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 		return _move_validation(false, "actor_id is empty", authoritative_tile)
 	if actor.is_empty():
 		return _move_validation(false, "actor does not exist", authoritative_tile)
+	if moving_actor_ids.has(actor_id):
+		return _move_validation(false, "actor is already moving", authoritative_tile)
 	var owner_peer_id := int(actor.get(EntityData.OWNER_PEER_ID, 0))
 	if owner_peer_id != peer_id and not SessionState.is_gm(peer_id):
 		return _move_validation(false, "peer does not own actor", authoritative_tile)
@@ -352,6 +413,25 @@ func _as_vector2i(value: Variant) -> Vector2i:
 	return Vector2i.ZERO
 
 
+func _sanitize_chat_message(message: String) -> String:
+	var clean_message: String = message.strip_edges()
+	clean_message = clean_message.replace("\r", " ")
+	clean_message = clean_message.replace("\n", " ")
+	while clean_message.contains("  "):
+		clean_message = clean_message.replace("  ", " ")
+	if clean_message.length() > MvpConstants.MAX_CHAT_LENGTH:
+		clean_message = clean_message.substr(0, MvpConstants.MAX_CHAT_LENGTH)
+	return clean_message
+
+
+func _system_payload(text: String) -> Dictionary:
+	return {
+		"kind": "system",
+		"message": text,
+		"server_time": Time.get_unix_time_from_system(),
+	}
+
+
 @rpc("any_peer", "reliable")
 func c2s_join_request(payload: Dictionary) -> void:
 	if not is_server:
@@ -369,8 +449,40 @@ func c2s_join_request(payload: Dictionary) -> void:
 		s2c_state_snapshot(SessionState.serialize_snapshot())
 	else:
 		s2c_join_accepted.rpc_id(peer_id, accepted)
-		s2c_system_message.rpc_id(peer_id, "join accepted")
+		_send_system_message(peer_id, "join accepted")
 	_broadcast_snapshot()
+
+
+@rpc("any_peer", "reliable")
+func c2s_chat_send(message: String) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var clean_message: String = _sanitize_chat_message(message)
+	if clean_message.is_empty():
+		_send_chat_rejected(peer_id, "empty message")
+		return
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty():
+		_send_chat_rejected(peer_id, "peer is not registered")
+		return
+	var payload: Dictionary = {
+		"kind": "player",
+		"peer_id": peer_id,
+		"player_id": str(player.get(EntityData.PLAYER_ID, "")),
+		"name": str(player.get(EntityData.NAME, "Player")),
+		"role": str(player.get(EntityData.ROLE, MvpConstants.ROLE_PLAYER)),
+		"message": clean_message,
+		"server_time": Time.get_unix_time_from_system(),
+	}
+	print("chat received: peer=%d name=%s message=%s" % [
+		peer_id,
+		str(payload.get("name", "")),
+		clean_message,
+	])
+	_broadcast_chat_message(payload)
 
 
 @rpc("any_peer", "reliable")
@@ -402,6 +514,7 @@ func c2s_move_request(payload: Dictionary) -> void:
 	var path: Array = validation.get("path", [from_tile, to_tile])
 	var cost: int = int(validation.get("cost", max(path.size() - 1, 0)))
 	SessionState.move_actor(actor_id, to_tile, false)
+	_lock_actor_movement(actor_id, cost)
 	_broadcast_actor_moved({
 		"actor_id": actor_id,
 		"from_tile": from_tile,
@@ -429,6 +542,19 @@ func s2c_join_accepted(payload: Dictionary) -> void:
 @rpc("authority", "reliable")
 func s2c_system_message(text: String) -> void:
 	print("system: ", text)
+	var payload: Dictionary = _system_payload(text)
+	SessionState.add_chat_message(payload)
+	system_message_received.emit(payload)
+
+
+@rpc("authority", "reliable")
+func s2c_chat_message(payload: Dictionary) -> void:
+	print("chat message: %s: %s" % [
+		str(payload.get("name", "Player")),
+		str(payload.get("message", "")),
+	])
+	SessionState.add_chat_message(payload.duplicate(true))
+	chat_message_received.emit(payload.duplicate(true))
 
 
 @rpc("authority", "reliable")
