@@ -21,6 +21,7 @@ func _ready() -> void:
 	name_label.z_as_relative = false
 	name_label.z_index = 4096
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_center_name_label()
 
 
 func apply_actor_state(actor: Dictionary) -> void:
@@ -31,6 +32,7 @@ func apply_actor_state(actor: Dictionary) -> void:
 		name_label.text = display_name
 	else:
 		name_label.text = "%s (%s)" % [display_name, actor_kind]
+	_center_name_label()
 	var sprite_path := _resolve_sprite_path(str(actor.get(EntityData.SPRITE, "")), actor_kind)
 	if not sprite_path.is_empty():
 		sprite.texture = load(sprite_path)
@@ -121,6 +123,14 @@ func _apply_sprite_origin(sprite_path: String, kind: String) -> void:
 		sprite.offset = Vector2(0, -24)
 		return
 	sprite.offset = Vector2.ZERO
+
+
+func _center_name_label() -> void:
+	var label_width: float = 320.0
+	name_label.offset_left = -label_width * 0.5
+	name_label.offset_right = label_width * 0.5
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 
 func _as_vector2i(value: Variant) -> Vector2i:

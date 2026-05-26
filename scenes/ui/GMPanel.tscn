@@ -24,16 +24,9 @@ layout_mode = 2
 max_length = 14
 placeholder_text = "Custom Name"
 
-[node name="Buttons" type="HBoxContainer" parent="VBoxContainer"]
+[node name="SpawnModeCheckBox" type="CheckBox" parent="VBoxContainer"]
 layout_mode = 2
-
-[node name="SpawnButton" type="Button" parent="VBoxContainer/Buttons"]
-layout_mode = 2
-text = "Spawn NPC"
-
-[node name="CancelButton" type="Button" parent="VBoxContainer/Buttons"]
-layout_mode = 2
-text = "Cancel"
+text = "Enable Spawn Mode"
 
 [node name="StatusLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2

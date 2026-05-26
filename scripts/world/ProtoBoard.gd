@@ -90,13 +90,11 @@ func _handle_gm_tool_click(tile: Vector2i) -> bool:
 		return false
 	if not GMToolState.is_gm_spawn_mode_active():
 		return false
-	var requested: bool = NetworkService.request_gm_spawn_npc(
+	NetworkService.request_gm_spawn_npc(
 		GMToolState.get_selected_npc_type(),
 		GMToolState.get_selected_npc_name(),
 		tile
 	)
-	if requested:
-		GMToolState.clear_gm_tool()
 	return true
 
 
