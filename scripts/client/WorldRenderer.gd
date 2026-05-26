@@ -8,12 +8,19 @@ var entity_renderer: EntityRenderer
 
 func bind_board(new_board: Node) -> void:
 	board = new_board
-	TileRules.configure(board)
-	entity_renderer = board.get_node_or_null("Tokens/EntityRenderer") as EntityRenderer
+	TileRules.bind_board(board)
+	var token_root: Node = null
+	if board:
+		if board.has_method("get_tokens_root"):
+			token_root = board.get_tokens_root() as Node
+		else:
+			token_root = board.get_node_or_null("Tokens")
+	entity_renderer = null
+	if token_root:
+		entity_renderer = token_root.get_node_or_null("EntityRenderer") as EntityRenderer
 	if not entity_renderer:
 		entity_renderer = EntityRenderer.new()
 		entity_renderer.name = "EntityRenderer"
-		var token_root := board.get_node_or_null("Tokens")
 		if token_root:
 			token_root.add_child(entity_renderer)
 

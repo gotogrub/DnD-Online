@@ -8,11 +8,26 @@ var layer0: TileMapLayer
 var layer1: TileMapLayer
 
 
-func configure(new_board: Node) -> void:
+func bind_board(new_board: Node) -> void:
 	board = new_board
-	board_path = board.get_path() if board else NodePath()
-	layer0 = (board.get_node_or_null("Layer0") as TileMapLayer) if board else null
-	layer1 = (board.get_node_or_null("Layer1") as TileMapLayer) if board else null
+	board_path = NodePath()
+	layer0 = null
+	layer1 = null
+	if not board:
+		return
+	board_path = board.get_path()
+	if board.has_method("get_layer0"):
+		layer0 = board.get_layer0() as TileMapLayer
+	else:
+		layer0 = board.get_node_or_null("Layer0") as TileMapLayer
+	if board.has_method("get_layer1"):
+		layer1 = board.get_layer1() as TileMapLayer
+	else:
+		layer1 = board.get_node_or_null("Layer1") as TileMapLayer
+
+
+func configure(new_board: Node) -> void:
+	bind_board(new_board)
 
 
 func world_to_tile(world_position: Vector2) -> Vector2i:
@@ -91,11 +106,6 @@ func _has_blocking_layer1_tile(tile: Vector2i) -> bool:
 		return false
 	var candidates := [tile, tile - Vector2i(1, 1)]
 	for candidate in candidates:
-		var tile_data := layer1.get_cell_tile_data(candidate)
-		if not tile_data:
-			continue
-		if tile_data.get_collision_polygons_count(0) > 0:
-			return true
 		if layer1.get_cell_source_id(candidate) != -1:
 			return true
 	return false

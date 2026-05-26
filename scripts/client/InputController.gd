@@ -9,7 +9,7 @@ var controlled_actor_id := ""
 
 func bind_board(new_board: Node) -> void:
 	board = new_board
-	TileRules.configure(board)
+	TileRules.bind_board(board)
 
 
 func handle_tile_clicked(tile: Vector2i) -> void:
