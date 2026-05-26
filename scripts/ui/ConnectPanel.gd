@@ -14,6 +14,7 @@ var is_collapsed := false
 
 
 func _ready() -> void:
+	name_input.max_length = MvpConstants.MAX_NAME_LENGTH
 	host_button.pressed.connect(_on_host_pressed)
 	join_button.pressed.connect(_on_join_pressed)
 	collapse_button.pressed.connect(_on_collapse_pressed)

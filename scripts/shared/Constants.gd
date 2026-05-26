@@ -4,7 +4,7 @@ class_name MvpConstants
 
 const DEFAULT_PORT := 7000
 const MAX_PLAYERS := 16
-const MAX_NAME_LENGTH := 32
+const MAX_NAME_LENGTH := 14
 const MAX_CHAT_LENGTH := 512
 const DEFAULT_MAP_ID := "proto_world"
 const MOVE_STEP_SECONDS := 0.12

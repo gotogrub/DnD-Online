@@ -16,9 +16,12 @@ script = ExtResource("5_script")
 [node name="ConnectPanel" parent="UI" instance=ExtResource("2_connect")]
 
 [node name="ChatPanel" parent="UI" instance=ExtResource("3_chat")]
-offset_top = 716.0
-offset_right = 480.0
-offset_bottom = 1080.0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = -316.0
+offset_right = 488.0
+offset_bottom = -8.0
 
 [node name="EncounterPanel" parent="UI" instance=ExtResource("4_encounter")]
 offset_left = 1520.0

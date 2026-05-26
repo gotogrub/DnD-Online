@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://scripts/ui/ChatPanel.gd" id="1_script"]
 
 [node name="ChatPanel" type="PanelContainer"]
+custom_minimum_size = Vector2(480, 300)
 offset_right = 480.0
 offset_bottom = 300.0
 script = ExtResource("1_script")
@@ -13,6 +14,7 @@ layout_mode = 2
 [node name="Messages" type="RichTextLabel" parent="VBoxContainer"]
 custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
+size_flags_vertical = 3
 scroll_following = true
 
 [node name="Input" type="LineEdit" parent="VBoxContainer"]

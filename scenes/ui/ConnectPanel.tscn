@@ -12,6 +12,7 @@ layout_mode = 2
 
 [node name="NameInput" type="LineEdit" parent="VBoxContainer"]
 layout_mode = 2
+max_length = 14
 placeholder_text = "Name"
 
 [node name="AddressInput" type="LineEdit" parent="VBoxContainer"]
