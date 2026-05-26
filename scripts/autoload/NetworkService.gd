@@ -27,6 +27,7 @@ var player_name := ""
 var players_by_peer_id := {}
 var client_move_seq := 0
 var moving_actor_ids := {}
+var client_visual_moving_actor_ids := {}
 
 
 func start_server(port: int) -> bool:
@@ -108,6 +109,9 @@ func request_move(actor_id: String, to_tile: Vector2i) -> bool:
 	if actor_id.is_empty():
 		print("move request ignored: no actor selected")
 		return false
+	if is_client_actor_visual_moving(actor_id):
+		print("move request ignored: actor is visually moving: %s" % actor_id)
+		return false
 	client_move_seq += 1
 	var payload: Dictionary = {
 		"actor_id": actor_id,
@@ -120,6 +124,19 @@ func request_move(actor_id: String, to_tile: Vector2i) -> bool:
 	else:
 		c2s_move_request.rpc_id(1, payload)
 	return true
+
+
+func set_client_actor_visual_moving(actor_id: String, moving: bool) -> void:
+	if actor_id.is_empty():
+		return
+	if moving:
+		client_visual_moving_actor_ids[actor_id] = true
+	else:
+		client_visual_moving_actor_ids.erase(actor_id)
+
+
+func is_client_actor_visual_moving(actor_id: String) -> bool:
+	return client_visual_moving_actor_ids.has(actor_id)
 
 
 func request_chat_message(message: String) -> bool:
@@ -161,6 +178,7 @@ func _disconnect_peer() -> void:
 	players_by_peer_id.clear()
 	client_move_seq = 0
 	moving_actor_ids.clear()
+	client_visual_moving_actor_ids.clear()
 
 
 func _on_peer_connected(peer_id: int) -> void:
@@ -324,9 +342,10 @@ func _send_system_message(peer_id: int, text: String) -> void:
 
 
 func _send_move_rejected(peer_id: int, payload: Dictionary) -> void:
-	print("move rejected: peer=%d actor=%s reason=%s" % [
+	print("move rejected: peer=%d actor=%s reason_code=%s reason=%s" % [
 		peer_id,
 		str(payload.get("actor_id", "")),
+		str(payload.get("reason_code", "")),
 		str(payload.get("reason", "unknown")),
 	])
 	if peer_id == local_peer_id:
@@ -343,43 +362,58 @@ func _send_chat_rejected(peer_id: int, reason: String) -> void:
 func _lock_actor_movement(actor_id: String, step_count: int) -> void:
 	if actor_id.is_empty():
 		return
-	moving_actor_ids[actor_id] = true
-	var duration: float = max(float(step_count) * 0.12 + 0.05, 0.17)
+	var duration: float = _movement_lock_duration(step_count)
+	var expires_at_msec: int = Time.get_ticks_msec() + int(duration * 1000.0)
+	moving_actor_ids[actor_id] = expires_at_msec
+	print("movement lock acquired: actor=%s steps=%d duration=%.2f" % [actor_id, step_count, duration])
 	var timer: SceneTreeTimer = get_tree().create_timer(duration)
-	timer.timeout.connect(_clear_actor_movement_lock.bind(actor_id))
+	timer.timeout.connect(_clear_actor_movement_lock.bind(actor_id, expires_at_msec))
 
 
-func _clear_actor_movement_lock(actor_id: String) -> void:
+func _clear_actor_movement_lock(actor_id: String, expected_expires_at_msec: int) -> void:
+	if not moving_actor_ids.has(actor_id):
+		return
+	if int(moving_actor_ids.get(actor_id, 0)) != expected_expires_at_msec:
+		return
 	moving_actor_ids.erase(actor_id)
+	print("movement lock released: actor=%s" % actor_id)
+
+
+func _movement_lock_duration(step_count: int) -> float:
+	return max(
+		float(step_count) * MvpConstants.MOVE_STEP_SECONDS + MvpConstants.MOVE_LOCK_GRACE_SECONDS,
+		MvpConstants.MOVE_MIN_LOCK_SECONDS
+	)
 
 
 func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -> Dictionary:
 	var actor: Dictionary = SessionState.get_actor(actor_id)
 	var authoritative_tile: Vector2i = _actor_tile(actor)
 	if SessionState.get_player(peer_id).is_empty():
-		return _move_validation(false, "peer is not registered", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_PEER_NOT_REGISTERED, authoritative_tile)
 	if actor_id.is_empty():
-		return _move_validation(false, "actor_id is empty", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_ACTOR_ID_EMPTY, authoritative_tile)
 	if actor.is_empty():
-		return _move_validation(false, "actor does not exist", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_ACTOR_NOT_FOUND, authoritative_tile)
 	var owner_peer_id := int(actor.get(EntityData.OWNER_PEER_ID, 0))
 	if owner_peer_id != peer_id and not SessionState.is_gm(peer_id):
-		return _move_validation(false, "peer does not own actor", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_NOT_ACTOR_OWNER, authoritative_tile)
 	if moving_actor_ids.has(actor_id):
-		return _move_validation(false, "actor is already moving", authoritative_tile, false)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_ACTOR_ALREADY_MOVING, authoritative_tile, false)
 	var from_tile: Vector2i = authoritative_tile
 	if not TileRules.has_tile(to_tile):
-		return _move_validation(false, "tile does not exist", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_TILE_MISSING, authoritative_tile)
 	if not TileRules.is_walkable(to_tile):
-		return _move_validation(false, "tile is not walkable", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_TILE_NOT_WALKABLE, authoritative_tile)
 	if TileRules.is_occupied(to_tile, actor_id):
-		return _move_validation(false, "tile is occupied", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_TILE_OCCUPIED, authoritative_tile)
 	var path: Array = TileRules.find_path(from_tile, to_tile, actor_id)
 	if path.size() < 2:
-		return _move_validation(false, "no path to tile", authoritative_tile)
+		return _move_validation(false, MvpConstants.MOVE_REJECT_NO_PATH, authoritative_tile)
 	return {
 		"ok": true,
 		"reason": "",
+		"reason_code": "",
 		"from_tile": from_tile,
 		"authoritative_tile": authoritative_tile,
 		"path": path,
@@ -387,13 +421,37 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 	}
 
 
-func _move_validation(ok: bool, reason: String, authoritative_tile: Vector2i, snap_to_authoritative: bool = true) -> Dictionary:
+func _move_validation(ok: bool, reason_code: String, authoritative_tile: Vector2i, snap_to_authoritative: bool = true) -> Dictionary:
 	return {
 		"ok": ok,
-		"reason": reason,
+		"reason": _move_reject_reason(reason_code),
+		"reason_code": reason_code,
 		"authoritative_tile": authoritative_tile,
 		"snap_to_authoritative": snap_to_authoritative,
 	}
+
+
+func _move_reject_reason(reason_code: String) -> String:
+	match reason_code:
+		MvpConstants.MOVE_REJECT_PEER_NOT_REGISTERED:
+			return "peer is not registered"
+		MvpConstants.MOVE_REJECT_ACTOR_ID_EMPTY:
+			return "actor_id is empty"
+		MvpConstants.MOVE_REJECT_ACTOR_NOT_FOUND:
+			return "actor does not exist"
+		MvpConstants.MOVE_REJECT_NOT_ACTOR_OWNER:
+			return "peer does not own actor"
+		MvpConstants.MOVE_REJECT_ACTOR_ALREADY_MOVING:
+			return "actor is already moving"
+		MvpConstants.MOVE_REJECT_TILE_MISSING:
+			return "tile does not exist"
+		MvpConstants.MOVE_REJECT_TILE_NOT_WALKABLE:
+			return "tile is not walkable"
+		MvpConstants.MOVE_REJECT_TILE_OCCUPIED:
+			return "tile is occupied"
+		MvpConstants.MOVE_REJECT_NO_PATH:
+			return "no path to tile"
+	return "move rejected"
 
 
 func _actor_tile(actor: Dictionary) -> Vector2i:
@@ -507,6 +565,7 @@ func c2s_move_request(payload: Dictionary) -> void:
 		_send_move_rejected(peer_id, {
 			"actor_id": actor_id,
 			"reason": str(validation.get("reason", "move rejected")),
+			"reason_code": str(validation.get("reason_code", "")),
 			"authoritative_tile": validation.get("authoritative_tile", Vector2i.ZERO),
 			"snap_to_authoritative": bool(validation.get("snap_to_authoritative", true)),
 			"client_seq": client_seq,
@@ -590,12 +649,18 @@ func s2c_move_rejected(payload: Dictionary) -> void:
 	var actor_id := str(payload.get("actor_id", ""))
 	var authoritative_tile: Vector2i = _as_vector2i(payload.get("authoritative_tile", Vector2i.ZERO))
 	var reason := str(payload.get("reason", "move rejected"))
-	print("move rejected: actor=%s reason=%s authoritative_tile=%s seq=%d" % [
+	var reason_code: String = str(payload.get("reason_code", ""))
+	var should_snap: bool = bool(payload.get("snap_to_authoritative", true))
+	if reason_code == MvpConstants.MOVE_REJECT_ACTOR_ALREADY_MOVING:
+		should_snap = false
+	print("move rejected: actor=%s reason_code=%s reason=%s authoritative_tile=%s snap=%s seq=%d" % [
 		actor_id,
+		reason_code,
 		reason,
 		str(authoritative_tile),
+		str(should_snap),
 		int(payload.get("client_seq", 0)),
 	])
-	if bool(payload.get("snap_to_authoritative", true)) and not actor_id.is_empty() and SessionState.has_actor(actor_id):
+	if should_snap and not actor_id.is_empty() and SessionState.has_actor(actor_id):
 		SessionState.move_actor(actor_id, authoritative_tile)
 	move_rejected.emit(payload.duplicate(true))

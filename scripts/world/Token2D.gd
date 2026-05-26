@@ -2,7 +2,10 @@ extends Node2D
 class_name Token2DView
 ## Displays a server-authored actor record as a simple isometric token.
 
-@export var move_seconds := 0.12
+signal movement_started(actor_id: String)
+signal movement_finished(actor_id: String)
+
+@export var move_seconds: float = MvpConstants.MOVE_STEP_SECONDS
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var name_label: Label = $NameLabel
@@ -10,6 +13,7 @@ class_name Token2DView
 var actor_id := ""
 var actor_kind := ""
 var current_tile := Vector2i.ZERO
+var is_moving := false
 var move_tween: Tween
 
 
@@ -49,9 +53,12 @@ func move_to_world(world_pos: Vector2, tween := true) -> void:
 		move_tween.kill()
 	if not tween or move_seconds <= 0.0:
 		global_position = world_pos
+		_finish_movement()
 		return
+	_begin_movement()
 	move_tween = create_tween()
 	move_tween.tween_property(self, "global_position", world_pos, move_seconds)
+	move_tween.finished.connect(_finish_movement)
 
 
 func move_along_path(tile_path: Array[Vector2i], world_points: Array[Vector2], tween := true) -> void:
@@ -62,10 +69,31 @@ func move_along_path(tile_path: Array[Vector2i], world_points: Array[Vector2], t
 		move_tween.kill()
 	if not tween or move_seconds <= 0.0 or world_points.size() == 1:
 		global_position = world_points[world_points.size() - 1]
+		_finish_movement()
 		return
+	_begin_movement()
 	move_tween = create_tween()
 	for index in range(1, world_points.size()):
 		move_tween.tween_property(self, "global_position", world_points[index], move_seconds)
+	move_tween.finished.connect(_finish_movement)
+
+
+func is_visual_moving() -> bool:
+	return is_moving
+
+
+func _begin_movement() -> void:
+	if is_moving:
+		return
+	is_moving = true
+	movement_started.emit(actor_id)
+
+
+func _finish_movement() -> void:
+	if not is_moving:
+		return
+	is_moving = false
+	movement_finished.emit(actor_id)
 
 
 func _resolve_sprite_path(sprite_key: String, kind: String) -> String:

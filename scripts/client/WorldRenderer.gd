@@ -7,6 +7,7 @@ const TOKEN_SCENE := preload("res://scenes/entities/Token2D.tscn")
 var board: Node
 var token_root: Node2D
 var token_by_actor_id := {}
+var visually_moving_actor_ids := {}
 
 
 func bind_board(new_board: Node) -> void:
@@ -46,6 +47,7 @@ func spawn_or_update_actor(actor: Dictionary) -> Node2D:
 			return null
 		token.name = actor_id
 		token_root.add_child(token)
+		_connect_token_signals(token)
 		token_by_actor_id[actor_id] = token
 	if token.has_method("apply_actor_state"):
 		token.apply_actor_state(actor)
@@ -96,8 +98,13 @@ func move_actor_visual_path(actor_id: String, path: Array, tween := true) -> voi
 func remove_actor(actor_id: String) -> void:
 	var token := token_by_actor_id.get(actor_id) as Node
 	token_by_actor_id.erase(actor_id)
+	_set_actor_visually_moving(actor_id, false)
 	if is_instance_valid(token):
 		token.queue_free()
+
+
+func is_actor_visually_moving(actor_id: String) -> bool:
+	return visually_moving_actor_ids.has(actor_id)
 
 
 func render_snapshot(snapshot: Dictionary) -> void:
@@ -143,12 +150,43 @@ func _on_actor_moved_received(payload: Dictionary) -> void:
 
 
 func _on_move_rejected(payload: Dictionary) -> void:
+	var reason_code: String = str(payload.get("reason_code", ""))
+	if reason_code == MvpConstants.MOVE_REJECT_ACTOR_ALREADY_MOVING:
+		return
 	if not bool(payload.get("snap_to_authoritative", true)):
 		return
 	var actor_id := str(payload.get("actor_id", ""))
 	if actor_id.is_empty():
 		return
 	move_actor_visual(actor_id, _as_vector2i(payload.get("authoritative_tile", Vector2i.ZERO)), false)
+
+
+func _connect_token_signals(token: Node2D) -> void:
+	var started: Callable = Callable(self, "_on_token_movement_started")
+	var finished: Callable = Callable(self, "_on_token_movement_finished")
+	if token.has_signal("movement_started") and not token.is_connected("movement_started", started):
+		token.connect("movement_started", started)
+	if token.has_signal("movement_finished") and not token.is_connected("movement_finished", finished):
+		token.connect("movement_finished", finished)
+
+
+func _on_token_movement_started(actor_id: String) -> void:
+	_set_actor_visually_moving(actor_id, true)
+
+
+func _on_token_movement_finished(actor_id: String) -> void:
+	_set_actor_visually_moving(actor_id, false)
+
+
+func _set_actor_visually_moving(actor_id: String, moving: bool) -> void:
+	if actor_id.is_empty():
+		return
+	if moving:
+		visually_moving_actor_ids[actor_id] = true
+	else:
+		visually_moving_actor_ids.erase(actor_id)
+	if NetworkService.has_method("set_client_actor_visual_moving"):
+		NetworkService.set_client_actor_visual_moving(actor_id, moving)
 
 
 func _as_vector2i(value: Variant) -> Vector2i:
