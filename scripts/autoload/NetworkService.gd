@@ -422,34 +422,54 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 
 
 func _move_validation(ok: bool, reason_code: String, authoritative_tile: Vector2i, snap_to_authoritative: bool = true) -> Dictionary:
+	var canonical_reason_code: String = _canonical_move_reject_code(reason_code)
 	return {
 		"ok": ok,
-		"reason": _move_reject_reason(reason_code),
-		"reason_code": reason_code,
+		"reason": _move_reject_reason(canonical_reason_code),
+		"reason_code": canonical_reason_code,
 		"authoritative_tile": authoritative_tile,
 		"snap_to_authoritative": snap_to_authoritative,
 	}
 
 
+func _canonical_move_reject_code(reason_code: String) -> String:
+	match reason_code:
+		MvpConstants.MOVE_REJECT_PEER_NOT_REGISTERED, MvpConstants.MOVE_REJECT_ACTOR_ID_EMPTY:
+			return "invalid_request"
+		MvpConstants.MOVE_REJECT_ACTOR_NOT_FOUND:
+			return "actor_not_found"
+		MvpConstants.MOVE_REJECT_NOT_ACTOR_OWNER:
+			return "not_your_actor"
+		MvpConstants.MOVE_REJECT_ACTOR_ALREADY_MOVING:
+			return "actor_already_moving"
+		MvpConstants.MOVE_REJECT_TILE_MISSING:
+			return "tile_does_not_exist"
+		MvpConstants.MOVE_REJECT_TILE_NOT_WALKABLE:
+			return "tile_not_walkable"
+		MvpConstants.MOVE_REJECT_TILE_OCCUPIED:
+			return "tile_occupied"
+		MvpConstants.MOVE_REJECT_NO_PATH:
+			return "no_path_found"
+	return "invalid_request"
+
+
 func _move_reject_reason(reason_code: String) -> String:
 	match reason_code:
-		MvpConstants.MOVE_REJECT_PEER_NOT_REGISTERED:
-			return "peer is not registered"
-		MvpConstants.MOVE_REJECT_ACTOR_ID_EMPTY:
-			return "actor_id is empty"
-		MvpConstants.MOVE_REJECT_ACTOR_NOT_FOUND:
+		"invalid_request":
+			return "invalid move request"
+		"actor_not_found":
 			return "actor does not exist"
-		MvpConstants.MOVE_REJECT_NOT_ACTOR_OWNER:
+		"not_your_actor":
 			return "peer does not own actor"
-		MvpConstants.MOVE_REJECT_ACTOR_ALREADY_MOVING:
+		"actor_already_moving":
 			return "actor is already moving"
-		MvpConstants.MOVE_REJECT_TILE_MISSING:
+		"tile_does_not_exist":
 			return "tile does not exist"
-		MvpConstants.MOVE_REJECT_TILE_NOT_WALKABLE:
+		"tile_not_walkable":
 			return "tile is not walkable"
-		MvpConstants.MOVE_REJECT_TILE_OCCUPIED:
+		"tile_occupied":
 			return "tile is occupied"
-		MvpConstants.MOVE_REJECT_NO_PATH:
+		"no_path_found":
 			return "no path to tile"
 	return "move rejected"
 
