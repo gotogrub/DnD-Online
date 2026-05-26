@@ -307,16 +307,16 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 	if owner_peer_id != peer_id and not SessionState.is_gm(peer_id):
 		return _move_validation(false, "peer does not own actor", authoritative_tile)
 	var from_tile: Vector2i = authoritative_tile
-	var delta: Vector2i = to_tile - from_tile
-	var distance: int = abs(delta.x) + abs(delta.y)
-	if distance != 1:
-		return _move_validation(false, "move must be one cardinal tile", authoritative_tile)
 	if not TileRules.has_tile(to_tile):
 		return _move_validation(false, "tile does not exist", authoritative_tile)
 	if not TileRules.is_walkable(to_tile):
 		return _move_validation(false, "tile is not walkable", authoritative_tile)
 	if TileRules.is_occupied(to_tile, actor_id):
 		return _move_validation(false, "tile is occupied", authoritative_tile)
+	var delta: Vector2i = to_tile - from_tile
+	var distance: int = abs(delta.x) + abs(delta.y)
+	if distance != 1:
+		return _move_validation(false, "move must be one cardinal tile", authoritative_tile)
 	return {
 		"ok": true,
 		"reason": "",
