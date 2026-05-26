@@ -30,6 +30,7 @@ func apply_actor_state(actor: Dictionary) -> void:
 	var sprite_path := _resolve_sprite_path(str(actor.get(EntityData.SPRITE, "")), actor_kind)
 	if not sprite_path.is_empty():
 		sprite.texture = load(sprite_path)
+		_apply_sprite_origin(sprite_path, actor_kind)
 	var tile: Vector2i = actor.get(EntityData.TILE, Vector2i.ZERO)
 	set_tile(tile, TileRules.tile_to_world(tile))
 
@@ -53,6 +54,20 @@ func move_to_world(world_pos: Vector2, tween := true) -> void:
 	move_tween.tween_property(self, "global_position", world_pos, move_seconds)
 
 
+func move_along_path(tile_path: Array[Vector2i], world_points: Array[Vector2], tween := true) -> void:
+	if tile_path.is_empty() or world_points.is_empty():
+		return
+	current_tile = _as_vector2i(tile_path[tile_path.size() - 1])
+	if move_tween and move_tween.is_valid():
+		move_tween.kill()
+	if not tween or move_seconds <= 0.0 or world_points.size() == 1:
+		global_position = world_points[world_points.size() - 1]
+		return
+	move_tween = create_tween()
+	for index in range(1, world_points.size()):
+		move_tween.tween_property(self, "global_position", world_points[index], move_seconds)
+
+
 func _resolve_sprite_path(sprite_key: String, kind: String) -> String:
 	if sprite_key == MvpConstants.ACTOR_KIND_PLAYER or sprite_key == "player":
 		return MvpConstants.DEFAULT_PLAYER_SPRITE
@@ -67,3 +82,26 @@ func _resolve_sprite_path(sprite_key: String, kind: String) -> String:
 	if kind == MvpConstants.ACTOR_KIND_NPC:
 		return MvpConstants.DEFAULT_NPC_SPRITE
 	return ""
+
+
+func _apply_sprite_origin(sprite_path: String, kind: String) -> void:
+	sprite.centered = true
+	if kind == MvpConstants.ACTOR_KIND_PLAYER or kind == MvpConstants.ACTOR_KIND_NPC:
+		sprite.offset = Vector2(0, -24)
+		return
+	if sprite_path == MvpConstants.DEFAULT_PLAYER_SPRITE or sprite_path == MvpConstants.DEFAULT_NPC_SPRITE:
+		sprite.offset = Vector2(0, -24)
+		return
+	sprite.offset = Vector2.ZERO
+
+
+func _as_vector2i(value: Variant) -> Vector2i:
+	if value is Vector2i:
+		return value
+	if value is Vector2:
+		return Vector2i(int(value.x), int(value.y))
+	if value is Dictionary:
+		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
+	if value is Array and value.size() >= 2:
+		return Vector2i(int(value[0]), int(value[1]))
+	return Vector2i.ZERO

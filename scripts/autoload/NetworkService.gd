@@ -313,15 +313,16 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 		return _move_validation(false, "tile is not walkable", authoritative_tile)
 	if TileRules.is_occupied(to_tile, actor_id):
 		return _move_validation(false, "tile is occupied", authoritative_tile)
-	var delta: Vector2i = to_tile - from_tile
-	var distance: int = abs(delta.x) + abs(delta.y)
-	if distance != 1:
-		return _move_validation(false, "move must be one cardinal tile", authoritative_tile)
+	var path: Array = TileRules.find_path(from_tile, to_tile, actor_id)
+	if path.size() < 2:
+		return _move_validation(false, "no path to tile", authoritative_tile)
 	return {
 		"ok": true,
 		"reason": "",
 		"from_tile": from_tile,
 		"authoritative_tile": authoritative_tile,
+		"path": path,
+		"cost": TileRules.path_cost(path),
 	}
 
 
@@ -380,7 +381,7 @@ func c2s_move_request(payload: Dictionary) -> void:
 	if peer_id == 0:
 		peer_id = local_peer_id
 	var actor_id := str(payload.get("actor_id", ""))
-	var to_tile := _as_vector2i(payload.get("to_tile", Vector2i.ZERO))
+	var to_tile: Vector2i = _as_vector2i(payload.get("to_tile", Vector2i.ZERO))
 	var client_seq := int(payload.get("client_seq", 0))
 	print("move request received: peer=%d actor=%s to_tile=%s seq=%d" % [
 		peer_id,
@@ -398,13 +399,15 @@ func c2s_move_request(payload: Dictionary) -> void:
 		})
 		return
 	var from_tile: Vector2i = _as_vector2i(validation.get("from_tile", Vector2i.ZERO))
-	SessionState.move_actor(actor_id, to_tile)
+	var path: Array = validation.get("path", [from_tile, to_tile])
+	var cost: int = int(validation.get("cost", max(path.size() - 1, 0)))
+	SessionState.move_actor(actor_id, to_tile, false)
 	_broadcast_actor_moved({
 		"actor_id": actor_id,
 		"from_tile": from_tile,
 		"to_tile": to_tile,
-		"path": [from_tile, to_tile],
-		"cost": 1,
+		"path": path,
+		"cost": cost,
 		"client_seq": client_seq,
 	})
 
@@ -442,7 +445,7 @@ func s2c_state_snapshot(snapshot: Dictionary) -> void:
 @rpc("authority", "reliable")
 func s2c_actor_moved(payload: Dictionary) -> void:
 	var actor_id := str(payload.get("actor_id", ""))
-	var to_tile := _as_vector2i(payload.get("to_tile", Vector2i.ZERO))
+	var to_tile: Vector2i = _as_vector2i(payload.get("to_tile", Vector2i.ZERO))
 	print("actor moved: actor=%s to_tile=%s cost=%d seq=%d" % [
 		actor_id,
 		str(to_tile),
@@ -450,14 +453,14 @@ func s2c_actor_moved(payload: Dictionary) -> void:
 		int(payload.get("client_seq", 0)),
 	])
 	if not actor_id.is_empty():
-		SessionState.move_actor(actor_id, to_tile)
+		SessionState.move_actor(actor_id, to_tile, false)
 	actor_moved_received.emit(payload.duplicate(true))
 
 
 @rpc("authority", "reliable")
 func s2c_move_rejected(payload: Dictionary) -> void:
 	var actor_id := str(payload.get("actor_id", ""))
-	var authoritative_tile := _as_vector2i(payload.get("authoritative_tile", Vector2i.ZERO))
+	var authoritative_tile: Vector2i = _as_vector2i(payload.get("authoritative_tile", Vector2i.ZERO))
 	var reason := str(payload.get("reason", "move rejected"))
 	print("move rejected: actor=%s reason=%s authoritative_tile=%s seq=%d" % [
 		actor_id,

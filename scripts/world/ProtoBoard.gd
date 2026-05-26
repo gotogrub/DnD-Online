@@ -69,8 +69,7 @@ func _handle_click_actor_debug(world_pos: Vector2) -> void:
 		print("is_occupied: ", occupied)
 		print("selected_actor_id: ", selected_actor_id)
 	if SessionState.is_network_mode:
-		var requested_tile := _resolve_network_move_tile(selected_actor_id, tile)
-		NetworkService.request_move(selected_actor_id, requested_tile)
+		NetworkService.request_move(selected_actor_id, tile)
 		return
 	tile_clicked.emit(tile)
 	if not can_move:
@@ -98,67 +97,3 @@ func _setup_local_debug_state() -> void:
 	SessionState.selected_actor_id = "actor_player_1"
 	if world_renderer:
 		world_renderer.render_full_state(SessionState.get_actors())
-
-
-func _resolve_network_move_tile(actor_id: String, clicked_tile: Vector2i) -> Vector2i:
-	if actor_id.is_empty():
-		return clicked_tile
-	var actor: Dictionary = SessionState.get_actor(actor_id)
-	if actor.is_empty():
-		return clicked_tile
-	var from_tile: Vector2i = _actor_tile(actor)
-	var delta: Vector2i = clicked_tile - from_tile
-	var distance: int = abs(delta.x) + abs(delta.y)
-	if distance <= 1:
-		return clicked_tile
-	if not TileRules.has_tile(clicked_tile) or not TileRules.is_walkable(clicked_tile):
-		return clicked_tile
-	var candidate_tiles: Array[Vector2i] = _direction_candidates(from_tile, delta)
-	for candidate_tile in candidate_tiles:
-		if TileRules.is_walkable(candidate_tile) and not TileRules.is_occupied(candidate_tile, actor_id):
-			if click_debug_enabled:
-				print("network move target clamped: ", clicked_tile, " -> ", candidate_tile)
-			return candidate_tile
-	if not candidate_tiles.is_empty():
-		if click_debug_enabled:
-			print("network move target blocked, asking server: ", candidate_tiles[0])
-		return candidate_tiles[0]
-	return clicked_tile
-
-
-func _direction_candidates(from_tile: Vector2i, delta: Vector2i) -> Array[Vector2i]:
-	var candidates: Array[Vector2i] = []
-	var x_step: int = _axis_step(delta.x)
-	var y_step: int = _axis_step(delta.y)
-	if abs(delta.x) >= abs(delta.y):
-		if x_step != 0:
-			candidates.append(from_tile + Vector2i(x_step, 0))
-		if y_step != 0:
-			candidates.append(from_tile + Vector2i(0, y_step))
-	else:
-		if y_step != 0:
-			candidates.append(from_tile + Vector2i(0, y_step))
-		if x_step != 0:
-			candidates.append(from_tile + Vector2i(x_step, 0))
-	return candidates
-
-
-func _axis_step(value: int) -> int:
-	if value > 0:
-		return 1
-	if value < 0:
-		return -1
-	return 0
-
-
-func _actor_tile(actor: Dictionary) -> Vector2i:
-	var tile_value: Variant = actor.get(EntityData.TILE, Vector2i.ZERO)
-	if tile_value is Vector2i:
-		return tile_value
-	if tile_value is Vector2:
-		return Vector2i(int(tile_value.x), int(tile_value.y))
-	if tile_value is Dictionary:
-		return Vector2i(int(tile_value.get("x", 0)), int(tile_value.get("y", 0)))
-	if tile_value is Array and tile_value.size() >= 2:
-		return Vector2i(int(tile_value[0]), int(tile_value[1]))
-	return Vector2i.ZERO

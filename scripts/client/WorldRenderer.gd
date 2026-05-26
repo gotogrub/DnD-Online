@@ -69,6 +69,30 @@ func move_actor_visual(actor_id: String, to_tile: Vector2i, tween := true) -> vo
 		token.global_position = world_pos
 
 
+func move_actor_visual_path(actor_id: String, path: Array, tween := true) -> void:
+	if path.size() < 2:
+		var fallback_tile := Vector2i.ZERO
+		if not path.is_empty():
+			fallback_tile = _as_vector2i(path[path.size() - 1])
+		move_actor_visual(actor_id, fallback_tile, tween)
+		return
+	var token := token_by_actor_id.get(actor_id) as Node2D
+	if not is_instance_valid(token):
+		token = spawn_or_update_actor(SessionState.get_actor(actor_id))
+	if not is_instance_valid(token):
+		return
+	var tile_path: Array[Vector2i] = []
+	var world_points: Array[Vector2] = []
+	for raw_tile in path:
+		var tile: Vector2i = _as_vector2i(raw_tile)
+		tile_path.append(tile)
+		world_points.append(TileRules.tile_to_world(tile))
+	if token.has_method("move_along_path"):
+		token.move_along_path(tile_path, world_points, tween)
+	else:
+		move_actor_visual(actor_id, tile_path[tile_path.size() - 1], tween)
+
+
 func remove_actor(actor_id: String) -> void:
 	var token := token_by_actor_id.get(actor_id) as Node
 	token_by_actor_id.erase(actor_id)
@@ -94,6 +118,8 @@ func _connect_session_state() -> void:
 		SessionState.actor_removed.connect(_on_actor_removed)
 	if not NetworkService.move_rejected.is_connected(_on_move_rejected):
 		NetworkService.move_rejected.connect(_on_move_rejected)
+	if not NetworkService.actor_moved_received.is_connected(_on_actor_moved_received):
+		NetworkService.actor_moved_received.connect(_on_actor_moved_received)
 
 
 func _on_actors_changed() -> void:
@@ -106,6 +132,14 @@ func _on_actor_moved(actor_id: String, _from_tile: Vector2i, to_tile: Vector2i) 
 
 func _on_actor_removed(actor_id: String) -> void:
 	remove_actor(actor_id)
+
+
+func _on_actor_moved_received(payload: Dictionary) -> void:
+	var actor_id := str(payload.get("actor_id", ""))
+	if actor_id.is_empty():
+		return
+	var path: Array = payload.get("path", [])
+	move_actor_visual_path(actor_id, path, true)
 
 
 func _on_move_rejected(payload: Dictionary) -> void:

@@ -122,7 +122,7 @@ func set_actor(actor_data: Dictionary) -> void:
 	state_changed.emit()
 
 
-func move_actor(actor_id: String, tile: Vector2i) -> bool:
+func move_actor(actor_id: String, tile: Vector2i, emit_visual: bool = true) -> bool:
 	if not actors.has(actor_id):
 		return false
 	var actor: Dictionary = actors[actor_id]
@@ -131,7 +131,8 @@ func move_actor(actor_id: String, tile: Vector2i) -> bool:
 		return true
 	actor[EntityData.TILE] = tile
 	actors[actor_id] = actor
-	actor_moved.emit(actor_id, from_tile, tile)
+	if emit_visual:
+		actor_moved.emit(actor_id, from_tile, tile)
 	actor_changed.emit(actor_id)
 	state_changed.emit()
 	return true
