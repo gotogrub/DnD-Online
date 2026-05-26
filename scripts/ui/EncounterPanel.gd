@@ -18,6 +18,10 @@ func apply_encounter_state(state: Dictionary) -> void:
 	ap_label.text = "AP: -"
 
 
+func set_encounter_visible(active: bool) -> void:
+	visible = active
+
+
 func _on_next_turn_pressed() -> void:
 	NetworkService.send_intent(NetMessages.C2S_ENCOUNTER_COMMAND, {
 		"command": "turn",

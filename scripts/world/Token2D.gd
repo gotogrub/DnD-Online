@@ -13,6 +13,12 @@ var current_tile := Vector2i.ZERO
 var move_tween: Tween
 
 
+func _ready() -> void:
+	name_label.z_as_relative = false
+	name_label.z_index = 4096
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
 func apply_actor_state(actor: Dictionary) -> void:
 	actor_id = str(actor.get(EntityData.ACTOR_ID, ""))
 	actor_kind = str(actor.get(EntityData.KIND, ""))

@@ -34,3 +34,11 @@ text = "Host"
 [node name="JoinButton" type="Button" parent="VBoxContainer/Buttons"]
 layout_mode = 2
 text = "Join"
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Disconnected"
+
+[node name="CollapseButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Connection"

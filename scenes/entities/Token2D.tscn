@@ -10,9 +10,12 @@ script = ExtResource("1_script")
 y_sort_enabled = true
 
 [node name="NameLabel" type="Label" parent="."]
+z_index = 4096
+z_as_relative = false
 offset_left = -48.0
 offset_top = -54.0
 offset_right = 48.0
 offset_bottom = -28.0
+mouse_filter = 2
 horizontal_alignment = 1
 vertical_alignment = 1

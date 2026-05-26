@@ -24,3 +24,11 @@ offset_bottom = 1080.0
 offset_left = 1520.0
 offset_right = 1920.0
 offset_bottom = 180.0
+
+[node name="DebugStatus" type="Label" parent="UI"]
+offset_left = 1220.0
+offset_top = 8.0
+offset_right = 1900.0
+offset_bottom = 34.0
+text = "offline | peer: - | role: -"
+horizontal_alignment = 2
