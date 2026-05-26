@@ -92,6 +92,8 @@ func _connect_session_state() -> void:
 		SessionState.actor_moved.connect(_on_actor_moved)
 	if not SessionState.actor_removed.is_connected(_on_actor_removed):
 		SessionState.actor_removed.connect(_on_actor_removed)
+	if not NetworkService.move_rejected.is_connected(_on_move_rejected):
+		NetworkService.move_rejected.connect(_on_move_rejected)
 
 
 func _on_actors_changed() -> void:
@@ -104,3 +106,22 @@ func _on_actor_moved(actor_id: String, _from_tile: Vector2i, to_tile: Vector2i) 
 
 func _on_actor_removed(actor_id: String) -> void:
 	remove_actor(actor_id)
+
+
+func _on_move_rejected(payload: Dictionary) -> void:
+	var actor_id := str(payload.get("actor_id", ""))
+	if actor_id.is_empty():
+		return
+	move_actor_visual(actor_id, _as_vector2i(payload.get("authoritative_tile", Vector2i.ZERO)), false)
+
+
+func _as_vector2i(value: Variant) -> Vector2i:
+	if value is Vector2i:
+		return value
+	if value is Vector2:
+		return Vector2i(int(value.x), int(value.y))
+	if value is Dictionary:
+		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
+	if value is Array and value.size() >= 2:
+		return Vector2i(int(value[0]), int(value[1]))
+	return Vector2i.ZERO

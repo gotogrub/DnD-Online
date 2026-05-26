@@ -15,6 +15,7 @@ func _ready() -> void:
 	NetworkService.peer_left.connect(_on_peer_left)
 	NetworkService.join_accepted.connect(_on_join_accepted)
 	NetworkService.network_error.connect(add_system_message)
+	NetworkService.move_rejected.connect(_on_move_rejected)
 
 
 func append_message(message: Dictionary) -> void:
@@ -52,3 +53,7 @@ func _on_peer_left(peer_id: int) -> void:
 
 func _on_join_accepted(_payload: Dictionary) -> void:
 	add_system_message("join accepted")
+
+
+func _on_move_rejected(payload: Dictionary) -> void:
+	add_system_message("move rejected: %s" % str(payload.get("reason", "unknown")))

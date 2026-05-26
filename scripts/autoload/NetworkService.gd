@@ -12,6 +12,8 @@ signal join_accepted(payload: Dictionary)
 signal network_error(message: String)
 signal intent_submitted(message_type: String, payload: Dictionary)
 signal snapshot_received(snapshot: Dictionary)
+signal actor_moved_received(payload: Dictionary)
+signal move_rejected(payload: Dictionary)
 
 var is_server := false
 var is_connected := false
@@ -21,6 +23,7 @@ var server_address := ""
 var server_port := MvpConstants.DEFAULT_PORT
 var player_name := ""
 var players_by_peer_id := {}
+var client_move_seq := 0
 
 
 func start_server(port: int) -> bool:
@@ -95,6 +98,27 @@ func receive_server_snapshot(snapshot: Dictionary) -> void:
 	snapshot_received.emit(snapshot.duplicate(true))
 
 
+func request_move(actor_id: String, to_tile: Vector2i) -> bool:
+	if not SessionState.is_network_mode:
+		print("move request ignored: not in network mode")
+		return false
+	if actor_id.is_empty():
+		print("move request ignored: no actor selected")
+		return false
+	client_move_seq += 1
+	var payload: Dictionary = {
+		"actor_id": actor_id,
+		"to_tile": to_tile,
+		"client_seq": client_move_seq,
+	}
+	print("move request: actor=%s to_tile=%s seq=%d" % [actor_id, str(to_tile), client_move_seq])
+	if is_network_server():
+		c2s_move_request(payload)
+	else:
+		c2s_move_request.rpc_id(1, payload)
+	return true
+
+
 func _connect_multiplayer_signals() -> void:
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
@@ -116,6 +140,7 @@ func _disconnect_peer() -> void:
 	is_connected = false
 	local_peer_id = 0
 	players_by_peer_id.clear()
+	client_move_seq = 0
 
 
 func _on_peer_connected(peer_id: int) -> void:
@@ -243,6 +268,89 @@ func _broadcast_snapshot() -> void:
 		s2c_state_snapshot.rpc_id(target_peer_id, snapshot)
 
 
+func _broadcast_actor_moved(payload: Dictionary) -> void:
+	print("broadcast actor moved: actor=%s from=%s to=%s" % [
+		str(payload.get("actor_id", "")),
+		str(payload.get("from_tile", Vector2i.ZERO)),
+		str(payload.get("to_tile", Vector2i.ZERO)),
+	])
+	s2c_actor_moved(payload)
+	for peer_id in players_by_peer_id.keys():
+		var target_peer_id := int(peer_id)
+		if target_peer_id == local_peer_id:
+			continue
+		s2c_actor_moved.rpc_id(target_peer_id, payload)
+
+
+func _send_move_rejected(peer_id: int, payload: Dictionary) -> void:
+	print("move rejected: peer=%d actor=%s reason=%s" % [
+		peer_id,
+		str(payload.get("actor_id", "")),
+		str(payload.get("reason", "unknown")),
+	])
+	if peer_id == local_peer_id:
+		s2c_move_rejected(payload)
+	else:
+		s2c_move_rejected.rpc_id(peer_id, payload)
+
+
+func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -> Dictionary:
+	var actor: Dictionary = SessionState.get_actor(actor_id)
+	var authoritative_tile: Vector2i = _actor_tile(actor)
+	if SessionState.get_player(peer_id).is_empty():
+		return _move_validation(false, "peer is not registered", authoritative_tile)
+	if actor_id.is_empty():
+		return _move_validation(false, "actor_id is empty", authoritative_tile)
+	if actor.is_empty():
+		return _move_validation(false, "actor does not exist", authoritative_tile)
+	var owner_peer_id := int(actor.get(EntityData.OWNER_PEER_ID, 0))
+	if owner_peer_id != peer_id and not SessionState.is_gm(peer_id):
+		return _move_validation(false, "peer does not own actor", authoritative_tile)
+	var from_tile: Vector2i = authoritative_tile
+	var delta: Vector2i = to_tile - from_tile
+	var distance: int = abs(delta.x) + abs(delta.y)
+	if distance != 1:
+		return _move_validation(false, "move must be one cardinal tile", authoritative_tile)
+	if not TileRules.has_tile(to_tile):
+		return _move_validation(false, "tile does not exist", authoritative_tile)
+	if not TileRules.is_walkable(to_tile):
+		return _move_validation(false, "tile is not walkable", authoritative_tile)
+	if TileRules.is_occupied(to_tile, actor_id):
+		return _move_validation(false, "tile is occupied", authoritative_tile)
+	return {
+		"ok": true,
+		"reason": "",
+		"from_tile": from_tile,
+		"authoritative_tile": authoritative_tile,
+	}
+
+
+func _move_validation(ok: bool, reason: String, authoritative_tile: Vector2i) -> Dictionary:
+	return {
+		"ok": ok,
+		"reason": reason,
+		"authoritative_tile": authoritative_tile,
+	}
+
+
+func _actor_tile(actor: Dictionary) -> Vector2i:
+	if actor.is_empty():
+		return Vector2i.ZERO
+	return _as_vector2i(actor.get(EntityData.TILE, Vector2i.ZERO))
+
+
+func _as_vector2i(value: Variant) -> Vector2i:
+	if value is Vector2i:
+		return value
+	if value is Vector2:
+		return Vector2i(int(value.x), int(value.y))
+	if value is Dictionary:
+		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
+	if value is Array and value.size() >= 2:
+		return Vector2i(int(value[0]), int(value[1]))
+	return Vector2i.ZERO
+
+
 @rpc("any_peer", "reliable")
 func c2s_join_request(payload: Dictionary) -> void:
 	if not is_server:
@@ -262,6 +370,43 @@ func c2s_join_request(payload: Dictionary) -> void:
 		s2c_join_accepted.rpc_id(peer_id, accepted)
 		s2c_system_message.rpc_id(peer_id, "join accepted")
 	_broadcast_snapshot()
+
+
+@rpc("any_peer", "reliable")
+func c2s_move_request(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id := multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var actor_id := str(payload.get("actor_id", ""))
+	var to_tile := _as_vector2i(payload.get("to_tile", Vector2i.ZERO))
+	var client_seq := int(payload.get("client_seq", 0))
+	print("move request received: peer=%d actor=%s to_tile=%s seq=%d" % [
+		peer_id,
+		actor_id,
+		str(to_tile),
+		client_seq,
+	])
+	var validation: Dictionary = _validate_move_request(peer_id, actor_id, to_tile)
+	if not bool(validation.get("ok", false)):
+		_send_move_rejected(peer_id, {
+			"actor_id": actor_id,
+			"reason": str(validation.get("reason", "move rejected")),
+			"authoritative_tile": validation.get("authoritative_tile", Vector2i.ZERO),
+			"client_seq": client_seq,
+		})
+		return
+	var from_tile: Vector2i = _as_vector2i(validation.get("from_tile", Vector2i.ZERO))
+	SessionState.move_actor(actor_id, to_tile)
+	_broadcast_actor_moved({
+		"actor_id": actor_id,
+		"from_tile": from_tile,
+		"to_tile": to_tile,
+		"path": [from_tile, to_tile],
+		"cost": 1,
+		"client_seq": client_seq,
+	})
 
 
 @rpc("authority", "reliable")
@@ -292,3 +437,34 @@ func s2c_state_snapshot(snapshot: Dictionary) -> void:
 		snapshot_players.size(),
 	])
 	receive_server_snapshot(snapshot)
+
+
+@rpc("authority", "reliable")
+func s2c_actor_moved(payload: Dictionary) -> void:
+	var actor_id := str(payload.get("actor_id", ""))
+	var to_tile := _as_vector2i(payload.get("to_tile", Vector2i.ZERO))
+	print("actor moved: actor=%s to_tile=%s cost=%d seq=%d" % [
+		actor_id,
+		str(to_tile),
+		int(payload.get("cost", 0)),
+		int(payload.get("client_seq", 0)),
+	])
+	if not actor_id.is_empty():
+		SessionState.move_actor(actor_id, to_tile)
+	actor_moved_received.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_move_rejected(payload: Dictionary) -> void:
+	var actor_id := str(payload.get("actor_id", ""))
+	var authoritative_tile := _as_vector2i(payload.get("authoritative_tile", Vector2i.ZERO))
+	var reason := str(payload.get("reason", "move rejected"))
+	print("move rejected: actor=%s reason=%s authoritative_tile=%s seq=%d" % [
+		actor_id,
+		reason,
+		str(authoritative_tile),
+		int(payload.get("client_seq", 0)),
+	])
+	if not actor_id.is_empty() and SessionState.has_actor(actor_id):
+		SessionState.move_actor(actor_id, authoritative_tile)
+	move_rejected.emit(payload.duplicate(true))

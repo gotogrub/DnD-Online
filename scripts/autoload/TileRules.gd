@@ -42,10 +42,14 @@ func tile_to_world(tile: Vector2i) -> Vector2:
 	return layer0.to_global(layer0.map_to_local(tile))
 
 
-func is_walkable(tile: Vector2i) -> bool:
+func has_tile(tile: Vector2i) -> bool:
 	if not layer0:
 		return false
-	if layer0.get_cell_source_id(tile) == -1:
+	return layer0.get_cell_source_id(tile) != -1
+
+
+func is_walkable(tile: Vector2i) -> bool:
+	if not has_tile(tile):
 		return false
 	if layer0.get_cell_atlas_coords(tile) == MvpConstants.BOUNDARY_ATLAS_COORDS:
 		return false
