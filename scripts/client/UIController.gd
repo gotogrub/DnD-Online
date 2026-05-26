@@ -102,8 +102,9 @@ func _update_debug_status() -> void:
 
 
 func _on_server_started(_port: int) -> void:
-	player_name = "Host"
-	player_role = MvpConstants.ROLE_GM
+	var local_player := SessionState.get_player(NetworkService.get_unique_peer_id())
+	player_name = str(local_player.get(EntityData.NAME, "Host"))
+	player_role = str(local_player.get(EntityData.ROLE, MvpConstants.ROLE_GM))
 	_set_ui_state(STATE_HOSTING)
 
 

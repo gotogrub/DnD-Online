@@ -30,6 +30,7 @@ func render_full_state(actors: Dictionary) -> void:
 		stale_ids.erase(actor_id)
 	for actor_id in stale_ids:
 		remove_actor(str(actor_id))
+	print("actors rendered: ", token_by_actor_id.size())
 
 
 func spawn_or_update_actor(actor: Dictionary) -> Node2D:

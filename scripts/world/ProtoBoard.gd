@@ -68,6 +68,10 @@ func _handle_click_actor_debug(world_pos: Vector2) -> void:
 		print("is_walkable: ", walkable)
 		print("is_occupied: ", occupied)
 		print("selected_actor_id: ", selected_actor_id)
+	if SessionState.is_network_mode:
+		if click_debug_enabled:
+			print("network movement is not implemented yet")
+		return
 	tile_clicked.emit(tile)
 	if not can_move:
 		if click_debug_enabled:

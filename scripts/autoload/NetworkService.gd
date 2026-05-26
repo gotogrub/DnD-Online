@@ -35,11 +35,15 @@ func start_server(port: int) -> bool:
 	is_connected = true
 	local_peer_id = multiplayer.get_unique_id()
 	players_by_peer_id.clear()
-	players_by_peer_id[local_peer_id] = _build_join_payload(local_peer_id, "Host", MvpConstants.ROLE_GM)
 	server_port = port
+	var host_name := _normalize_player_name(player_name)
+	if host_name == "Player":
+		host_name = "Host"
+	_prepare_server_session(host_name)
 	_connect_multiplayer_signals()
 	_emit_status("server started on port %d" % port)
 	server_started.emit(port)
+	s2c_state_snapshot(SessionState.serialize_snapshot())
 	return true
 
 
@@ -166,12 +170,77 @@ func _normalize_player_name(name: String) -> String:
 
 
 func _build_join_payload(peer_id: int, name: String, role: String) -> Dictionary:
+	var player_id := "player_%d" % peer_id
+	var actor_id := "actor_peer_%d" % peer_id
 	return {
 		"peer_id": peer_id,
 		"name": _normalize_player_name(name),
 		"role": role,
-		"player_id": "player_%d" % peer_id,
+		"player_id": player_id,
+		"actor_id": actor_id,
 	}
+
+
+func _prepare_server_session(host_name: String) -> void:
+	SessionState.reset_all()
+	SessionState.is_network_mode = true
+	SessionState.local_peer_id = local_peer_id
+	SessionState.local_role = MvpConstants.ROLE_GM
+	var host_actor_id := "actor_peer_%d" % local_peer_id
+	var host_player: Dictionary = SessionState.create_player(local_peer_id, host_name, MvpConstants.ROLE_GM, host_actor_id)
+	SessionState.local_player_id = str(host_player.get(EntityData.PLAYER_ID, ""))
+	SessionState.local_actor_id = host_actor_id
+	SessionState.selected_actor_id = host_actor_id
+	SessionState.create_actor(host_actor_id, MvpConstants.ACTOR_KIND_PLAYER, host_name, Vector2i(-2, 7), "player", true, local_peer_id)
+	SessionState.create_actor("actor_npc_goblin_1", MvpConstants.ACTOR_KIND_NPC, "Goblin", Vector2i(-5, 7), "npc", true, 0)
+	var accepted: Dictionary = {
+		"peer_id": local_peer_id,
+		"name": host_name,
+		"role": MvpConstants.ROLE_GM,
+		"player_id": SessionState.local_player_id,
+		"actor_id": host_actor_id,
+	}
+	players_by_peer_id[local_peer_id] = accepted.duplicate(true)
+
+
+func _create_joined_player(peer_id: int, name: String, role: String) -> Dictionary:
+	var actor_id := "actor_peer_%d" % peer_id
+	var player: Dictionary = SessionState.create_player(peer_id, name, role, actor_id)
+	var spawn_tile := _get_player_spawn_tile()
+	SessionState.create_actor(actor_id, MvpConstants.ACTOR_KIND_PLAYER, name, spawn_tile, "player", true, peer_id)
+	return {
+		"peer_id": peer_id,
+		"name": name,
+		"role": role,
+		"player_id": str(player.get(EntityData.PLAYER_ID, "player_%d" % peer_id)),
+		"actor_id": actor_id,
+	}
+
+
+func _get_player_spawn_tile() -> Vector2i:
+	var candidates := [
+		Vector2i(-3, 7),
+		Vector2i(-4, 7),
+		Vector2i(-3, 6),
+		Vector2i(-4, 6),
+		Vector2i(-6, 7),
+		Vector2i(-6, 6),
+	]
+	for tile in candidates:
+		if TileRules.is_walkable(tile) and not TileRules.is_occupied(tile):
+			return tile
+	return Vector2i(-3, 7)
+
+
+func _broadcast_snapshot() -> void:
+	var snapshot: Dictionary = SessionState.serialize_snapshot()
+	print("broadcast snapshot: actors=%d players=%d" % [SessionState.get_actors().size(), SessionState.get_players().size()])
+	s2c_state_snapshot(snapshot)
+	for peer_id in players_by_peer_id.keys():
+		var target_peer_id := int(peer_id)
+		if target_peer_id == local_peer_id:
+			continue
+		s2c_state_snapshot.rpc_id(target_peer_id, snapshot)
 
 
 @rpc("any_peer", "reliable")
@@ -183,19 +252,27 @@ func c2s_join_request(payload: Dictionary) -> void:
 		peer_id = local_peer_id
 	var name := _normalize_player_name(str(payload.get("name", "")))
 	var role := MvpConstants.ROLE_GM if peer_id == local_peer_id else MvpConstants.ROLE_PLAYER
-	var accepted := _build_join_payload(peer_id, name, role)
+	var accepted := _create_joined_player(peer_id, name, role)
 	players_by_peer_id[peer_id] = accepted.duplicate(true)
 	print("join request received: peer=%d name=%s role=%s" % [peer_id, name, role])
 	if peer_id == local_peer_id:
 		s2c_join_accepted(accepted)
+		s2c_state_snapshot(SessionState.serialize_snapshot())
 	else:
 		s2c_join_accepted.rpc_id(peer_id, accepted)
 		s2c_system_message.rpc_id(peer_id, "join accepted")
+	_broadcast_snapshot()
 
 
 @rpc("authority", "reliable")
 func s2c_join_accepted(payload: Dictionary) -> void:
 	local_peer_id = int(payload.get("peer_id", local_peer_id))
+	SessionState.is_network_mode = true
+	SessionState.local_peer_id = local_peer_id
+	SessionState.local_player_id = str(payload.get("player_id", ""))
+	SessionState.local_role = str(payload.get("role", ""))
+	SessionState.local_actor_id = str(payload.get("actor_id", ""))
+	SessionState.selected_actor_id = SessionState.local_actor_id
 	print("join accepted: ", payload)
 	join_accepted.emit(payload.duplicate(true))
 	_emit_status("join accepted")
@@ -204,3 +281,14 @@ func s2c_join_accepted(payload: Dictionary) -> void:
 @rpc("authority", "reliable")
 func s2c_system_message(text: String) -> void:
 	print("system: ", text)
+
+
+@rpc("authority", "reliable")
+func s2c_state_snapshot(snapshot: Dictionary) -> void:
+	var snapshot_actors := snapshot.get("actors", {}) as Dictionary
+	var snapshot_players := snapshot.get("players", {}) as Dictionary
+	print("state snapshot received: actors=%d players=%d" % [
+		snapshot_actors.size(),
+		snapshot_players.size(),
+	])
+	receive_server_snapshot(snapshot)

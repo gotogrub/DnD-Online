@@ -13,15 +13,29 @@ signal encounter_changed(encounter_state: Dictionary)
 var players := {}
 var actors := {}
 var selected_actor_id := ""
+var local_peer_id := 0
+var local_player_id := ""
+var local_role := ""
+var local_actor_id := ""
+var is_network_mode := false
 var encounter := {}
 var map_id := ""
 var chat_log: Array = []
 
 
 func reset() -> void:
+	reset_all()
+
+
+func reset_all() -> void:
 	players.clear()
 	actors.clear()
 	selected_actor_id = ""
+	local_peer_id = 0
+	local_player_id = ""
+	local_role = ""
+	local_actor_id = ""
+	is_network_mode = false
 	chat_log.clear()
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	encounter = _default_encounter()
@@ -32,6 +46,12 @@ func reset() -> void:
 func reset_local_debug_state() -> void:
 	actors.clear()
 	selected_actor_id = ""
+	if not is_network_mode:
+		players.clear()
+		local_peer_id = 0
+		local_player_id = ""
+		local_role = ""
+		local_actor_id = ""
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	actors_changed.emit()
 	state_changed.emit()
@@ -41,21 +61,26 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	map_id = str(snapshot.get("map_id", MvpConstants.DEFAULT_MAP_ID))
 	players = snapshot.get("players", {}).duplicate(true)
 	actors = snapshot.get("actors", {}).duplicate(true)
-	selected_actor_id = str(snapshot.get("selected_actor_id", selected_actor_id))
 	encounter = snapshot.get("encounter", _default_encounter()).duplicate(true)
 	chat_log = snapshot.get("chat_log", []).duplicate(true)
+	if is_network_mode and not local_actor_id.is_empty() and actors.has(local_actor_id):
+		selected_actor_id = local_actor_id
+	else:
+		selected_actor_id = str(snapshot.get("selected_actor_id", selected_actor_id))
 	actors_changed.emit()
 	state_changed.emit()
 
 
 func get_snapshot() -> Dictionary:
+	return serialize_snapshot()
+
+
+func serialize_snapshot() -> Dictionary:
 	return {
 		"map_id": map_id,
 		"players": players.duplicate(true),
 		"actors": actors.duplicate(true),
-		"selected_actor_id": selected_actor_id,
 		"encounter": encounter.duplicate(true),
-		"chat_log": chat_log.duplicate(true),
 	}
 
 
@@ -67,13 +92,13 @@ func get_actor(actor_id: String) -> Dictionary:
 	return actors.get(actor_id, {}).duplicate(true)
 
 
-func create_actor(actor_id: String, kind: String, actor_name: String, tile: Vector2i, sprite := "", blocks_tile := true) -> Dictionary:
+func create_actor(actor_id: String, kind: String, actor_name: String, tile: Vector2i, sprite := "", blocks_tile := true, owner_peer_id := 0) -> Dictionary:
 	if actor_id.is_empty():
 		return {}
 	var actor: Dictionary = EntityData.make_actor(
 		actor_id,
 		kind,
-		0,
+		owner_peer_id,
 		actor_name,
 		tile,
 		_resolve_actor_sprite(kind, sprite),
@@ -114,6 +139,20 @@ func move_actor(actor_id: String, tile: Vector2i) -> bool:
 
 func get_actors() -> Dictionary:
 	return actors.duplicate(true)
+
+
+func create_player(peer_id: int, player_name: String, role: String, actor_id: String) -> Dictionary:
+	if peer_id == 0:
+		return {}
+	var player_id := "player_%d" % peer_id
+	var player := EntityData.make_player(peer_id, player_id, player_name, role, actor_id)
+	players[peer_id] = player.duplicate(true)
+	state_changed.emit()
+	return player.duplicate(true)
+
+
+func get_players() -> Dictionary:
+	return players.duplicate(true)
 
 
 func remove_actor(actor_id: String) -> void:

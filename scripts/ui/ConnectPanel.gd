@@ -26,6 +26,7 @@ func _ready() -> void:
 
 
 func _on_host_pressed() -> void:
+	NetworkService.player_name = name_input.text
 	NetworkService.start_server(int(port_input.value))
 
 
