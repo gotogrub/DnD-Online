@@ -103,17 +103,17 @@ func _setup_local_debug_state() -> void:
 func _resolve_network_move_tile(actor_id: String, clicked_tile: Vector2i) -> Vector2i:
 	if actor_id.is_empty():
 		return clicked_tile
-	var actor := SessionState.get_actor(actor_id)
+	var actor: Dictionary = SessionState.get_actor(actor_id)
 	if actor.is_empty():
 		return clicked_tile
-	var from_tile := _actor_tile(actor)
-	var delta := clicked_tile - from_tile
-	var distance := abs(delta.x) + abs(delta.y)
+	var from_tile: Vector2i = _actor_tile(actor)
+	var delta: Vector2i = clicked_tile - from_tile
+	var distance: int = abs(delta.x) + abs(delta.y)
 	if distance <= 1:
 		return clicked_tile
 	if not TileRules.has_tile(clicked_tile) or not TileRules.is_walkable(clicked_tile):
 		return clicked_tile
-	var candidate_tiles := _direction_candidates(from_tile, delta)
+	var candidate_tiles: Array[Vector2i] = _direction_candidates(from_tile, delta)
 	for candidate_tile in candidate_tiles:
 		if TileRules.is_walkable(candidate_tile) and not TileRules.is_occupied(candidate_tile, actor_id):
 			if click_debug_enabled:
@@ -128,8 +128,8 @@ func _resolve_network_move_tile(actor_id: String, clicked_tile: Vector2i) -> Vec
 
 func _direction_candidates(from_tile: Vector2i, delta: Vector2i) -> Array[Vector2i]:
 	var candidates: Array[Vector2i] = []
-	var x_step := _axis_step(delta.x)
-	var y_step := _axis_step(delta.y)
+	var x_step: int = _axis_step(delta.x)
+	var y_step: int = _axis_step(delta.y)
 	if abs(delta.x) >= abs(delta.y):
 		if x_step != 0:
 			candidates.append(from_tile + Vector2i(x_step, 0))
