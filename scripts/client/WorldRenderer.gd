@@ -143,6 +143,8 @@ func _on_actor_moved_received(payload: Dictionary) -> void:
 
 
 func _on_move_rejected(payload: Dictionary) -> void:
+	if not bool(payload.get("snap_to_authoritative", true)):
+		return
 	var actor_id := str(payload.get("actor_id", ""))
 	if actor_id.is_empty():
 		return

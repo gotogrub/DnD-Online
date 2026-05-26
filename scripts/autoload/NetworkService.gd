@@ -362,11 +362,11 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 		return _move_validation(false, "actor_id is empty", authoritative_tile)
 	if actor.is_empty():
 		return _move_validation(false, "actor does not exist", authoritative_tile)
-	if moving_actor_ids.has(actor_id):
-		return _move_validation(false, "actor is already moving", authoritative_tile)
 	var owner_peer_id := int(actor.get(EntityData.OWNER_PEER_ID, 0))
 	if owner_peer_id != peer_id and not SessionState.is_gm(peer_id):
 		return _move_validation(false, "peer does not own actor", authoritative_tile)
+	if moving_actor_ids.has(actor_id):
+		return _move_validation(false, "actor is already moving", authoritative_tile, false)
 	var from_tile: Vector2i = authoritative_tile
 	if not TileRules.has_tile(to_tile):
 		return _move_validation(false, "tile does not exist", authoritative_tile)
@@ -387,11 +387,12 @@ func _validate_move_request(peer_id: int, actor_id: String, to_tile: Vector2i) -
 	}
 
 
-func _move_validation(ok: bool, reason: String, authoritative_tile: Vector2i) -> Dictionary:
+func _move_validation(ok: bool, reason: String, authoritative_tile: Vector2i, snap_to_authoritative: bool = true) -> Dictionary:
 	return {
 		"ok": ok,
 		"reason": reason,
 		"authoritative_tile": authoritative_tile,
+		"snap_to_authoritative": snap_to_authoritative,
 	}
 
 
@@ -507,6 +508,7 @@ func c2s_move_request(payload: Dictionary) -> void:
 			"actor_id": actor_id,
 			"reason": str(validation.get("reason", "move rejected")),
 			"authoritative_tile": validation.get("authoritative_tile", Vector2i.ZERO),
+			"snap_to_authoritative": bool(validation.get("snap_to_authoritative", true)),
 			"client_seq": client_seq,
 		})
 		return
@@ -594,6 +596,6 @@ func s2c_move_rejected(payload: Dictionary) -> void:
 		str(authoritative_tile),
 		int(payload.get("client_seq", 0)),
 	])
-	if not actor_id.is_empty() and SessionState.has_actor(actor_id):
+	if bool(payload.get("snap_to_authoritative", true)) and not actor_id.is_empty() and SessionState.has_actor(actor_id):
 		SessionState.move_actor(actor_id, authoritative_tile)
 	move_rejected.emit(payload.duplicate(true))
