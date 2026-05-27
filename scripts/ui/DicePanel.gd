@@ -43,7 +43,7 @@ func _setup_roll_buttons() -> void:
 
 func _setup_toggle_button() -> void:
 	toggle_button.tooltip_text = "Show dice"
-	_apply_button_icon(toggle_button, "res://tileset/d20.png")
+	_apply_button_icon(toggle_button, "res://tileset/dices_bag.png")
 	toggle_button.toggled.connect(_on_toggle_pressed)
 
 

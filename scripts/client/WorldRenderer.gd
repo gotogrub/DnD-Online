@@ -31,6 +31,8 @@ func render_full_state(actors: Dictionary) -> void:
 		stale_ids.erase(actor_id)
 	for actor_id in stale_ids:
 		remove_actor(str(actor_id))
+	_sync_gm_selection_with_state()
+	_update_selected_markers()
 	print("actors rendered: ", token_by_actor_id.size())
 
 
@@ -53,6 +55,8 @@ func spawn_or_update_actor(actor: Dictionary) -> Node2D:
 		token.apply_actor_state(actor)
 	elif token.has_method("apply_actor_data"):
 		token.apply_actor_data(actor)
+	var selected_active: bool = SessionState.local_role == MvpConstants.ROLE_GM and GMToolState.has_selected_actor(actor_id)
+	_update_token_selected(actor_id, token, selected_active)
 	return token
 
 
@@ -99,6 +103,8 @@ func remove_actor(actor_id: String) -> void:
 	var token := token_by_actor_id.get(actor_id) as Node
 	token_by_actor_id.erase(actor_id)
 	_set_actor_visually_moving(actor_id, false)
+	if GMToolState.has_selected_actor(actor_id):
+		GMToolState.remove_selected_actor(actor_id)
 	if is_instance_valid(token):
 		token.queue_free()
 
@@ -127,6 +133,8 @@ func _connect_session_state() -> void:
 		NetworkService.move_rejected.connect(_on_move_rejected)
 	if not NetworkService.actor_moved_received.is_connected(_on_actor_moved_received):
 		NetworkService.actor_moved_received.connect(_on_actor_moved_received)
+	if not GMToolState.tool_changed.is_connected(_on_gm_tool_changed):
+		GMToolState.tool_changed.connect(_on_gm_tool_changed)
 
 
 func _on_actors_changed() -> void:
@@ -139,6 +147,10 @@ func _on_actor_moved(actor_id: String, _from_tile: Vector2i, to_tile: Vector2i) 
 
 func _on_actor_removed(actor_id: String) -> void:
 	remove_actor(actor_id)
+
+
+func _on_gm_tool_changed() -> void:
+	_update_selected_markers()
 
 
 func _on_actor_moved_received(payload: Dictionary) -> void:
@@ -187,6 +199,27 @@ func _set_actor_visually_moving(actor_id: String, moving: bool) -> void:
 		visually_moving_actor_ids.erase(actor_id)
 	if NetworkService.has_method("set_client_actor_visual_moving"):
 		NetworkService.set_client_actor_visual_moving(actor_id, moving)
+
+
+func _sync_gm_selection_with_state() -> void:
+	for actor_id in GMToolState.get_selected_actor_ids():
+		if not SessionState.has_actor(actor_id):
+			GMToolState.remove_selected_actor(actor_id)
+
+
+func _update_selected_markers() -> void:
+	var show_selection: bool = SessionState.local_role == MvpConstants.ROLE_GM
+	for raw_actor_id in token_by_actor_id.keys():
+		var actor_id: String = str(raw_actor_id)
+		var token: Node2D = token_by_actor_id.get(actor_id) as Node2D
+		_update_token_selected(actor_id, token, show_selection and GMToolState.has_selected_actor(actor_id))
+
+
+func _update_token_selected(actor_id: String, token: Node2D, active: bool = false) -> void:
+	if not is_instance_valid(token):
+		return
+	if token.has_method("set_selected"):
+		token.set_selected(active)
 
 
 func _as_vector2i(value: Variant) -> Vector2i:

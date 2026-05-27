@@ -42,7 +42,7 @@ offset_bottom = 180.0
 offset_left = 1520.0
 offset_top = 196.0
 offset_right = 1900.0
-offset_bottom = 380.0
+offset_bottom = 480.0
 
 [node name="DebugStatus" type="Label" parent="UI"]
 offset_left = 1220.0

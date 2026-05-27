@@ -6,6 +6,12 @@
 y_sort_enabled = true
 script = ExtResource("1_script")
 
+[node name="SelectedMarker" type="Polygon2D" parent="."]
+visible = false
+z_index = -1
+color = Color(1, 0.84, 0.12, 0.62)
+polygon = PackedVector2Array(0, -18, 28, -4, 0, 10, -28, -4)
+
 [node name="Sprite2D" type="Sprite2D" parent="."]
 y_sort_enabled = true
 
@@ -13,9 +19,9 @@ y_sort_enabled = true
 z_index = 4096
 z_as_relative = false
 offset_left = -160.0
-offset_top = -54.0
+offset_top = -90.0
 offset_right = 160.0
-offset_bottom = -28.0
+offset_bottom = -64.0
 mouse_filter = 2
 horizontal_alignment = 1
 vertical_alignment = 1

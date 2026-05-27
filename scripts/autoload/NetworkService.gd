@@ -21,28 +21,28 @@ signal roll_result_received(payload: Dictionary)
 const NPC_TYPES := {
 	"goblin": {
 		"name": "Goblin",
-		"sprite": "npc",
+		"sprite": MvpConstants.SPRITE_NPC_GOBLIN,
 		"ap": 6,
 		"max_ap": 6,
 		"blocks_tile": true,
 	},
 	"raider": {
 		"name": "Raider",
-		"sprite": "npc",
+		"sprite": MvpConstants.SPRITE_NPC_RAIDER,
 		"ap": 6,
 		"max_ap": 6,
 		"blocks_tile": true,
 	},
 	"guard": {
 		"name": "Guard",
-		"sprite": "npc",
+		"sprite": MvpConstants.SPRITE_NPC_GUARD,
 		"ap": 6,
 		"max_ap": 6,
 		"blocks_tile": true,
 	},
 	"merchant": {
 		"name": "Merchant",
-		"sprite": "npc",
+		"sprite": MvpConstants.SPRITE_NPC_MERCHANT,
 		"ap": 6,
 		"max_ap": 6,
 		"blocks_tile": true,
@@ -225,6 +225,35 @@ func request_gm_spawn_npc(npc_type: String, npc_name: String, tile: Vector2i) ->
 		c2s_gm_spawn_npc(payload)
 	else:
 		c2s_gm_spawn_npc.rpc_id(1, payload)
+	return true
+
+
+func request_gm_delete_actor(actor_id: String) -> bool:
+	var actor_ids: Array[String] = [actor_id]
+	return request_gm_delete_actors(actor_ids)
+
+
+func request_gm_delete_actors(actor_ids: Array[String]) -> bool:
+	if not SessionState.is_network_mode:
+		print("delete actor request ignored: not in network mode")
+		return false
+	var normalized_actor_ids: Array[String] = []
+	for actor_id in actor_ids:
+		var normalized_actor_id: String = actor_id.strip_edges()
+		if normalized_actor_id.is_empty() or normalized_actor_ids.has(normalized_actor_id):
+			continue
+		normalized_actor_ids.append(normalized_actor_id)
+	if normalized_actor_ids.is_empty():
+		print("delete actor request ignored: no actor selected")
+		return false
+	var payload: Dictionary = {
+		"actor_ids": normalized_actor_ids,
+	}
+	print("delete actor request: actors=%s" % str(normalized_actor_ids))
+	if is_network_server():
+		c2s_gm_delete_actors(payload)
+	else:
+		c2s_gm_delete_actors.rpc_id(1, payload)
 	return true
 
 
@@ -457,6 +486,11 @@ func _send_spawn_rejected(peer_id: int, reason: String) -> void:
 	_send_system_message(peer_id, "Spawn rejected: %s" % reason)
 
 
+func _send_delete_rejected(peer_id: int, reason: String) -> void:
+	print("delete rejected: peer=%d reason=%s" % [peer_id, reason])
+	_send_system_message(peer_id, "Delete rejected: %s" % reason)
+
+
 func _lock_actor_movement(actor_id: String, step_count: int) -> void:
 	if actor_id.is_empty():
 		return
@@ -590,6 +624,21 @@ func _as_vector2i(value: Variant) -> Vector2i:
 	return Vector2i.ZERO
 
 
+func _as_string_array(value: Variant) -> Array[String]:
+	var result: Array[String] = []
+	if value is Array:
+		for raw_item in value:
+			var item: String = str(raw_item).strip_edges()
+			if item.is_empty() or result.has(item):
+				continue
+			result.append(item)
+		return result
+	var single_item: String = str(value).strip_edges()
+	if not single_item.is_empty():
+		result.append(single_item)
+	return result
+
+
 func _sanitize_chat_message(message: String) -> String:
 	var clean_message: String = message.strip_edges()
 	clean_message = clean_message.replace("\r", " ")
@@ -672,6 +721,30 @@ func _validate_gm_spawn_request(peer_id: int, npc_type: String, tile: Vector2i) 
 	if TileRules.is_occupied(tile):
 		return {"ok": false, "reason": "tile occupied"}
 	return {"ok": true, "reason": ""}
+
+
+func _validate_gm_delete_request(peer_id: int, actor_id: String) -> Dictionary:
+	var actor_ids: Array[String] = [actor_id]
+	return _validate_gm_delete_requests(peer_id, actor_ids)
+
+
+func _validate_gm_delete_requests(peer_id: int, actor_ids: Array[String]) -> Dictionary:
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty() or str(player.get(EntityData.ROLE, "")) != MvpConstants.ROLE_GM:
+		return {"ok": false, "reason": "gm role required"}
+	if actor_ids.is_empty():
+		return {"ok": false, "reason": "actor not found"}
+	var actors_to_delete: Array[Dictionary] = []
+	for actor_id in actor_ids:
+		if actor_id.is_empty() or not SessionState.has_actor(actor_id):
+			return {"ok": false, "reason": "actor not found"}
+		var actor: Dictionary = SessionState.get_actor(actor_id)
+		if str(actor.get(EntityData.KIND, "")) != MvpConstants.ACTOR_KIND_NPC:
+			return {"ok": false, "reason": "cannot delete player actor"}
+		if moving_actor_ids.has(actor_id):
+			return {"ok": false, "reason": "actor is moving"}
+		actors_to_delete.append(actor)
+	return {"ok": true, "reason": "", "actors": actors_to_delete}
 
 
 func _system_payload(text: String) -> Dictionary:
@@ -822,6 +895,52 @@ func c2s_gm_spawn_npc(payload: Dictionary) -> void:
 		str(tile),
 	])
 	_send_system_message(peer_id, "Spawned %s at %s" % [str(actor.get(EntityData.NAME, "NPC")), str(tile)])
+	_broadcast_snapshot()
+
+
+@rpc("any_peer", "reliable")
+func c2s_gm_delete_actor(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var actor_id: String = str(payload.get("actor_id", "")).strip_edges()
+	var actor_ids: Array[String] = [actor_id]
+	_handle_gm_delete_actors(peer_id, actor_ids)
+
+
+@rpc("any_peer", "reliable")
+func c2s_gm_delete_actors(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var actor_ids: Array[String] = _as_string_array(payload.get("actor_ids", []))
+	_handle_gm_delete_actors(peer_id, actor_ids)
+
+
+func _handle_gm_delete_actors(peer_id: int, actor_ids: Array[String]) -> void:
+	print("delete actors request received: peer=%d actors=%s" % [peer_id, str(actor_ids)])
+	var validation: Dictionary = _validate_gm_delete_requests(peer_id, actor_ids)
+	if not bool(validation.get("ok", false)):
+		_send_delete_rejected(peer_id, str(validation.get("reason", "invalid request")))
+		return
+	var actors: Array = validation.get("actors", [])
+	var deleted_names: Array[String] = []
+	for raw_actor in actors:
+		var actor: Dictionary = raw_actor as Dictionary
+		var actor_id: String = str(actor.get(EntityData.ACTOR_ID, ""))
+		if actor_id.is_empty():
+			continue
+		deleted_names.append(str(actor.get(EntityData.NAME, actor_id)))
+		SessionState.remove_actor(actor_id)
+	print("actors deleted: peer=%d count=%d names=%s" % [peer_id, deleted_names.size(), str(deleted_names)])
+	if deleted_names.size() == 1:
+		_send_system_message(peer_id, "Deleted %s" % deleted_names[0])
+	else:
+		_send_system_message(peer_id, "Deleted %d actors" % deleted_names.size())
 	_broadcast_snapshot()
 
 

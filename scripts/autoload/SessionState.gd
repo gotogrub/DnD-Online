@@ -176,6 +176,22 @@ func get_actors() -> Dictionary:
 	return actors.duplicate(true)
 
 
+func find_actor_at_tile(tile: Vector2i) -> String:
+	var fallback_actor_id := ""
+	for raw_actor in actors.values():
+		var actor: Dictionary = raw_actor as Dictionary
+		var actor_id := str(actor.get(EntityData.ACTOR_ID, ""))
+		if actor_id.is_empty():
+			continue
+		if actor.get(EntityData.TILE, Vector2i.ZERO) != tile:
+			continue
+		if bool(actor.get(EntityData.BLOCKS_TILE, true)):
+			return actor_id
+		if fallback_actor_id.is_empty():
+			fallback_actor_id = actor_id
+	return fallback_actor_id
+
+
 func create_player(peer_id: int, player_name: String, role: String, actor_id: String) -> Dictionary:
 	if peer_id == 0:
 		return {}

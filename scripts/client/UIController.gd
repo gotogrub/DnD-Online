@@ -15,6 +15,8 @@ var encounter_panel: Node
 var gm_panel: Node
 var debug_status: Label
 var roll_toast_scene := preload("res://scenes/ui/RollToast.tscn")
+var dice_roll_sound: AudioStream
+var dice_roll_player: AudioStreamPlayer
 var ui_state := STATE_OFFLINE
 var last_non_encounter_state := STATE_OFFLINE
 var player_name := "-"
@@ -30,6 +32,7 @@ func bind_ui(root: Node) -> void:
 	encounter_panel = root.get_node_or_null("EncounterPanel")
 	gm_panel = root.get_node_or_null("GMPanel")
 	debug_status = root.get_node_or_null("DebugStatus") as Label
+	_setup_dice_roll_audio()
 	_connect_network_signals()
 	_set_ui_state(STATE_OFFLINE)
 
@@ -69,6 +72,22 @@ func _connect_network_signals() -> void:
 		NetworkService.client_disconnected.connect(_on_client_disconnected)
 	if not NetworkService.network_error.is_connected(_on_network_error):
 		NetworkService.network_error.connect(_on_network_error)
+	if not NetworkService.roll_result_received.is_connected(_on_roll_result_received):
+		NetworkService.roll_result_received.connect(_on_roll_result_received)
+
+
+func _setup_dice_roll_audio() -> void:
+	if not ui_root or dice_roll_player:
+		return
+	if ResourceLoader.exists(MvpConstants.DICE_ROLL_SOUND):
+		dice_roll_sound = load(MvpConstants.DICE_ROLL_SOUND) as AudioStream
+	if not dice_roll_sound:
+		return
+	dice_roll_player = AudioStreamPlayer.new()
+	dice_roll_player.name = "DiceRollAudio"
+	dice_roll_player.stream = dice_roll_sound
+	dice_roll_player.volume_db = MvpConstants.DICE_ROLL_VOLUME_DB
+	ui_root.add_child(dice_roll_player)
 
 
 func _set_ui_state(new_state: String) -> void:
@@ -139,3 +158,15 @@ func _on_client_disconnected() -> void:
 
 func _on_network_error(_message: String) -> void:
 	_set_ui_state(STATE_OFFLINE)
+
+
+func _on_roll_result_received(_payload: Dictionary) -> void:
+	_play_dice_roll_sound()
+
+
+func _play_dice_roll_sound() -> void:
+	if not dice_roll_player:
+		return
+	if dice_roll_player.playing:
+		dice_roll_player.stop()
+	dice_roll_player.play()

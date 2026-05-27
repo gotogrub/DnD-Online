@@ -23,7 +23,8 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_handle_click_actor_debug(get_global_mouse_position())
+		var additive_select: bool = event.shift_pressed
+		_handle_click_actor_debug(get_global_mouse_position(), additive_select)
 
 
 func get_layer0() -> TileMapLayer:
@@ -54,7 +55,7 @@ func get_world_renderer() -> WorldRenderer:
 	return world_renderer
 
 
-func _handle_click_actor_debug(world_pos: Vector2) -> void:
+func _handle_click_actor_debug(world_pos: Vector2, additive_select := false) -> void:
 	var tile := world_to_tile(world_pos)
 	var tile_exists := has_tile(tile)
 	var walkable := tile_exists and TileRules.is_walkable(tile)
@@ -68,7 +69,7 @@ func _handle_click_actor_debug(world_pos: Vector2) -> void:
 		print("is_walkable: ", walkable)
 		print("is_occupied: ", occupied)
 		print("selected_actor_id: ", selected_actor_id)
-	if _handle_gm_tool_click(tile):
+	if _handle_gm_tool_click(tile, additive_select):
 		return
 	if SessionState.is_network_mode:
 		NetworkService.request_move(selected_actor_id, tile)
@@ -83,19 +84,47 @@ func _handle_click_actor_debug(world_pos: Vector2) -> void:
 		print("move_actor: ", moved)
 
 
-func _handle_gm_tool_click(tile: Vector2i) -> bool:
+func _handle_gm_tool_click(tile: Vector2i, additive_select := false) -> bool:
 	if not SessionState.is_network_mode:
 		return false
 	if SessionState.local_role != MvpConstants.ROLE_GM:
 		return false
-	if not GMToolState.is_gm_spawn_mode_active():
-		return false
-	NetworkService.request_gm_spawn_npc(
-		GMToolState.get_selected_npc_type(),
-		GMToolState.get_selected_npc_name(),
-		tile
-	)
-	return true
+	if GMToolState.is_gm_spawn_mode_active():
+		NetworkService.request_gm_spawn_npc(
+			GMToolState.get_selected_npc_type(),
+			GMToolState.get_selected_npc_name(),
+			tile
+		)
+		return true
+	if GMToolState.is_select_actor_mode_active():
+		_select_gm_actor_at_tile(tile, additive_select)
+		return true
+	if GMToolState.is_move_selected_mode_active():
+		if not GMToolState.can_move_selected_actor():
+			print("gm move selected ignored: select exactly one actor")
+			return true
+		var selected_actor_id: String = GMToolState.get_selected_actor_id()
+		NetworkService.request_move(selected_actor_id, tile)
+		return true
+	return false
+
+
+func _select_gm_actor_at_tile(tile: Vector2i, additive_select := false) -> void:
+	var actor_id: String = SessionState.find_actor_at_tile(tile)
+	if actor_id.is_empty():
+		if not additive_select:
+			GMToolState.clear_selected_actor()
+		print("gm select actor: no actor at tile %s" % str(tile))
+		return
+	var actor: Dictionary = SessionState.get_actor(actor_id)
+	if additive_select:
+		GMToolState.toggle_selected_actor(actor_id)
+	else:
+		GMToolState.set_selected_actor(actor_id)
+	print("gm selected actor: %s %s" % [
+		str(actor.get(EntityData.NAME, actor_id)),
+		actor_id,
+	])
 
 
 func _setup_world_renderer() -> void:

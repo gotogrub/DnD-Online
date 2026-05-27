@@ -7,8 +7,16 @@ signal movement_finished(actor_id: String)
 
 @export var move_seconds: float = MvpConstants.MOVE_STEP_SECONDS
 
+const NAME_LABEL_WIDTH := 320.0
+const NAME_LABEL_TOP := -90.0
+const NAME_LABEL_BOTTOM := -64.0
+const SELECTED_SPRITE_MODULATE := Color(1.22, 1.14, 0.72, 1.0)
+const SELECTED_LABEL_MODULATE := Color(1.0, 0.92, 0.45, 1.0)
+const TOKEN_FEET_OFFSET := Vector2(0, -32)
+
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var name_label: Label = $NameLabel
+@onready var selected_marker: Polygon2D = $SelectedMarker
 
 var actor_id := ""
 var actor_kind := ""
@@ -18,6 +26,7 @@ var move_tween: Tween
 
 
 func _ready() -> void:
+	selected_marker.visible = false
 	name_label.z_as_relative = false
 	name_label.z_index = 4096
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -84,6 +93,12 @@ func is_visual_moving() -> bool:
 	return is_moving
 
 
+func set_selected(active: bool) -> void:
+	selected_marker.visible = active
+	sprite.modulate = SELECTED_SPRITE_MODULATE if active else Color.WHITE
+	name_label.modulate = SELECTED_LABEL_MODULATE if active else Color.WHITE
+
+
 func _begin_movement() -> void:
 	if is_moving:
 		return
@@ -117,18 +132,19 @@ func _resolve_sprite_path(sprite_key: String, kind: String) -> String:
 func _apply_sprite_origin(sprite_path: String, kind: String) -> void:
 	sprite.centered = true
 	if kind == MvpConstants.ACTOR_KIND_PLAYER or kind == MvpConstants.ACTOR_KIND_NPC:
-		sprite.offset = Vector2(0, -24)
+		sprite.offset = TOKEN_FEET_OFFSET
 		return
 	if sprite_path == MvpConstants.DEFAULT_PLAYER_SPRITE or sprite_path == MvpConstants.DEFAULT_NPC_SPRITE:
-		sprite.offset = Vector2(0, -24)
+		sprite.offset = TOKEN_FEET_OFFSET
 		return
 	sprite.offset = Vector2.ZERO
 
 
 func _center_name_label() -> void:
-	var label_width: float = 320.0
-	name_label.offset_left = -label_width * 0.5
-	name_label.offset_right = label_width * 0.5
+	name_label.offset_left = -NAME_LABEL_WIDTH * 0.5
+	name_label.offset_top = NAME_LABEL_TOP
+	name_label.offset_right = NAME_LABEL_WIDTH * 0.5
+	name_label.offset_bottom = NAME_LABEL_BOTTOM
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
