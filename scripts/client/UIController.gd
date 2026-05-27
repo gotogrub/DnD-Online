@@ -11,6 +11,8 @@ var ui_root: Node
 var connect_panel: Node
 var chat_panel: Node
 var dice_panel: Node
+var character_panel: Node
+var character_button: Button
 var encounter_panel: Node
 var gm_panel: Node
 var debug_status: Label
@@ -29,9 +31,12 @@ func bind_ui(root: Node) -> void:
 	connect_panel = root.get_node_or_null("ConnectPanel")
 	chat_panel = root.get_node_or_null("ChatPanel")
 	dice_panel = root.get_node_or_null("DicePanel")
+	character_panel = root.get_node_or_null("CharacterSheetPanel")
+	character_button = root.get_node_or_null("CharacterButton") as Button
 	encounter_panel = root.get_node_or_null("EncounterPanel")
 	gm_panel = root.get_node_or_null("GMPanel")
 	debug_status = root.get_node_or_null("DebugStatus") as Label
+	_connect_ui_signals()
 	_setup_dice_roll_audio()
 	_connect_network_signals()
 	_set_ui_state(STATE_OFFLINE)
@@ -76,6 +81,11 @@ func _connect_network_signals() -> void:
 		NetworkService.roll_result_received.connect(_on_roll_result_received)
 
 
+func _connect_ui_signals() -> void:
+	if character_button and not character_button.pressed.is_connected(_on_character_button_pressed):
+		character_button.pressed.connect(_on_character_button_pressed)
+
+
 func _setup_dice_roll_audio() -> void:
 	if not ui_root or dice_roll_player:
 		return
@@ -103,6 +113,11 @@ func _set_ui_state(new_state: String) -> void:
 		chat_panel.visible = connected_like
 	if dice_panel:
 		dice_panel.visible = connected_like
+	if character_button:
+		character_button.visible = connected_like
+	if character_panel:
+		if not connected_like:
+			character_panel.visible = false
 	if encounter_panel:
 		var encounter_visible := new_state == STATE_IN_ENCOUNTER
 		if encounter_panel.has_method("set_encounter_visible"):
@@ -162,6 +177,39 @@ func _on_network_error(_message: String) -> void:
 
 func _on_roll_result_received(_payload: Dictionary) -> void:
 	_play_dice_roll_sound()
+
+
+func _on_character_button_pressed() -> void:
+	_toggle_character_panel()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	if key_event.keycode != KEY_C:
+		return
+	if _is_text_input_focused():
+		return
+	_toggle_character_panel()
+	get_viewport().set_input_as_handled()
+
+
+func _toggle_character_panel() -> void:
+	if not character_panel:
+		return
+	if character_button and not character_button.visible:
+		return
+	character_panel.visible = not character_panel.visible
+	if character_panel.visible and character_panel.has_method("refresh"):
+		character_panel.refresh()
+
+
+func _is_text_input_focused() -> bool:
+	var focused_control: Control = get_viewport().gui_get_focus_owner()
+	return focused_control is LineEdit or focused_control is TextEdit
 
 
 func _play_dice_roll_sound() -> void:

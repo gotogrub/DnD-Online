@@ -9,12 +9,16 @@ signal actor_moved(actor_id: String, from_tile: Vector2i, to_tile: Vector2i)
 signal actor_removed(actor_id: String)
 signal chat_message_added(message: Dictionary)
 signal encounter_changed(encounter_state: Dictionary)
+signal local_character_changed(character: Dictionary)
 
 var players := {}
 var actors := {}
 var selected_actor_id := ""
 var local_peer_id := 0
 var local_player_id := ""
+var local_owner_key := ""
+var local_character_id := ""
+var local_character: Dictionary = {}
 var local_role := ""
 var local_actor_id := ""
 var is_network_mode := false
@@ -34,6 +38,9 @@ func reset_all() -> void:
 	selected_actor_id = ""
 	local_peer_id = 0
 	local_player_id = ""
+	local_owner_key = ""
+	local_character_id = ""
+	local_character.clear()
 	local_role = ""
 	local_actor_id = ""
 	is_network_mode = false
@@ -42,6 +49,7 @@ func reset_all() -> void:
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	encounter = _default_encounter()
 	actors_changed.emit()
+	local_character_changed.emit({})
 	state_changed.emit()
 
 
@@ -52,10 +60,15 @@ func reset_local_debug_state() -> void:
 		players.clear()
 		local_peer_id = 0
 		local_player_id = ""
+		local_owner_key = ""
+		local_character_id = ""
+		local_character.clear()
 		local_role = ""
 		local_actor_id = ""
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	actors_changed.emit()
+	if not is_network_mode:
+		local_character_changed.emit({})
 	state_changed.emit()
 
 
@@ -84,6 +97,18 @@ func serialize_snapshot() -> Dictionary:
 		"actors": actors.duplicate(true),
 		"encounter": encounter.duplicate(true),
 	}
+
+
+func set_local_character(character: Dictionary) -> void:
+	local_character = character.duplicate(true)
+	local_character_id = str(local_character.get("character_id", local_character_id))
+	local_owner_key = str(local_character.get("owner_key", local_owner_key))
+	local_character_changed.emit(local_character.duplicate(true))
+	state_changed.emit()
+
+
+func get_local_character() -> Dictionary:
+	return local_character.duplicate(true)
 
 
 func has_actor(actor_id: String) -> bool:
@@ -192,11 +217,11 @@ func find_actor_at_tile(tile: Vector2i) -> String:
 	return fallback_actor_id
 
 
-func create_player(peer_id: int, player_name: String, role: String, actor_id: String) -> Dictionary:
+func create_player(peer_id: int, player_name: String, role: String, actor_id: String, owner_key: String = "", character_id: String = "") -> Dictionary:
 	if peer_id == 0:
 		return {}
 	var player_id := "player_%d" % peer_id
-	var player := EntityData.make_player(peer_id, player_id, player_name, role, actor_id)
+	var player := EntityData.make_player(peer_id, player_id, player_name, role, actor_id, owner_key, character_id)
 	players[peer_id] = player.duplicate(true)
 	state_changed.emit()
 	return player.duplicate(true)

@@ -15,22 +15,27 @@ const ROLE := "role"
 const PEER_ID := "peer_id"
 const PLAYER_ID := "player_id"
 const ACTOR_KIND := "actor_kind"
+const OWNER_KEY := "owner_key"
+const CHARACTER_ID := "character_id"
 
 
-static func make_player(peer_id: int, player_id: String, player_name: String, role: String, actor_id: String = "") -> Dictionary:
+static func make_player(peer_id: int, player_id: String, player_name: String, role: String, actor_id: String = "", owner_key: String = "", character_id: String = "") -> Dictionary:
 	return {
 		PEER_ID: peer_id,
 		PLAYER_ID: player_id,
+		OWNER_KEY: owner_key,
+		CHARACTER_ID: character_id,
 		NAME: player_name,
 		ROLE: role,
 		ACTOR_ID: actor_id,
 	}
 
 
-static func make_actor(actor_id: String, kind: String, owner_peer_id: int, actor_name: String, tile: Vector2i, sprite: String, max_ap: int, blocks_tile := true) -> Dictionary:
+static func make_actor(actor_id: String, kind: String, owner_peer_id: int, actor_name: String, tile: Vector2i, sprite: String, max_ap: int, blocks_tile := true, character_id: String = "") -> Dictionary:
 	return {
 		ACTOR_ID: actor_id,
 		KIND: kind,
+		CHARACTER_ID: character_id,
 		OWNER_PEER_ID: owner_peer_id,
 		NAME: actor_name,
 		TILE: tile,

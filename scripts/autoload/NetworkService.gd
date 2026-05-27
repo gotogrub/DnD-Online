@@ -56,6 +56,7 @@ var last_error := ""
 var server_address := ""
 var server_port := MvpConstants.DEFAULT_PORT
 var player_name := ""
+var client_id := ""
 var players_by_peer_id := {}
 var client_move_seq := 0
 var moving_actor_ids := {}
@@ -64,6 +65,7 @@ var client_visual_moving_actor_ids := {}
 
 func start_server(port: int) -> bool:
 	_disconnect_peer()
+	client_id = _load_or_create_client_id()
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_server(port, MvpConstants.MAX_PLAYERS)
 	if error != OK:
@@ -88,6 +90,7 @@ func start_server(port: int) -> bool:
 
 func connect_to_server(address: String, port: int, name: String) -> bool:
 	_disconnect_peer()
+	client_id = _load_or_create_client_id()
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_client(address, port)
 	if error != OK:
@@ -301,6 +304,7 @@ func _on_connected_to_server() -> void:
 	client_connected.emit()
 	c2s_join_request.rpc_id(1, {
 		"name": player_name,
+		"client_id": client_id,
 	})
 
 
@@ -334,7 +338,60 @@ func _normalize_player_name(name: String) -> String:
 	return normalized.substr(0, MvpConstants.MAX_NAME_LENGTH)
 
 
-func _build_join_payload(peer_id: int, name: String, role: String) -> Dictionary:
+func _load_or_create_client_id() -> String:
+	if not client_id.is_empty():
+		return client_id
+	if FileAccess.file_exists(MvpConstants.CLIENT_IDENTITY_PATH):
+		var file: FileAccess = FileAccess.open(MvpConstants.CLIENT_IDENTITY_PATH, FileAccess.READ)
+		if file != null:
+			var parsed_data: Variant = JSON.parse_string(file.get_as_text())
+			if parsed_data is Dictionary:
+				var stored_client_id: String = _normalize_client_id(str((parsed_data as Dictionary).get("client_id", "")))
+				if not stored_client_id.is_empty():
+					client_id = stored_client_id
+					return client_id
+	client_id = _generate_client_id()
+	_save_client_identity(client_id)
+	return client_id
+
+
+func _save_client_identity(identity_client_id: String) -> void:
+	var file: FileAccess = FileAccess.open(MvpConstants.CLIENT_IDENTITY_PATH, FileAccess.WRITE)
+	if file == null:
+		push_warning("Could not save client identity.")
+		return
+	file.store_string(JSON.stringify({"client_id": identity_client_id}, "\t"))
+
+
+func _generate_client_id() -> String:
+	randomize()
+	var tail: String = "%04x%08x" % [randi() % 65536, randi()]
+	return "%08x-%04x-%04x-%04x-%s" % [
+		randi(),
+		randi() % 65536,
+		randi() % 65536,
+		randi() % 65536,
+		tail,
+	]
+
+
+func _normalize_client_id(identity_client_id: String) -> String:
+	var normalized_client_id: String = identity_client_id.strip_edges()
+	normalized_client_id = normalized_client_id.replace("\r", "")
+	normalized_client_id = normalized_client_id.replace("\n", "")
+	if normalized_client_id.length() > 96:
+		normalized_client_id = normalized_client_id.substr(0, 96)
+	return normalized_client_id
+
+
+func _owner_key_from_client_id(peer_id: int, identity_client_id: String) -> String:
+	var normalized_client_id: String = _normalize_client_id(identity_client_id)
+	if normalized_client_id.is_empty():
+		return "peer_%d" % peer_id
+	return normalized_client_id
+
+
+func _build_join_payload(peer_id: int, name: String, role: String, owner_key: String = "", character_id: String = "") -> Dictionary:
 	var player_id := "player_%d" % peer_id
 	var actor_id := "actor_peer_%d" % peer_id
 	return {
@@ -343,6 +400,8 @@ func _build_join_payload(peer_id: int, name: String, role: String) -> Dictionary
 		"role": role,
 		"player_id": player_id,
 		"actor_id": actor_id,
+		"owner_key": owner_key,
+		"character_id": character_id,
 	}
 
 
@@ -351,34 +410,53 @@ func _prepare_server_session(host_name: String) -> void:
 	SessionState.is_network_mode = true
 	SessionState.local_peer_id = local_peer_id
 	SessionState.local_role = MvpConstants.ROLE_GM
-	var host_actor_id := "actor_peer_%d" % local_peer_id
-	var host_player: Dictionary = SessionState.create_player(local_peer_id, host_name, MvpConstants.ROLE_GM, host_actor_id)
+	var host_owner_key: String = _owner_key_from_client_id(local_peer_id, client_id)
+	var host_character: Dictionary = CharacterService.get_or_create_character_for_owner(host_owner_key, host_name, "human")
+	var host_character_id: String = str(host_character.get("character_id", ""))
+	var host_spawn_tile: Vector2i = _get_character_spawn_tile(host_character, Vector2i(-2, 7))
+	var host_actor: Dictionary = CharacterService.character_to_actor(host_character, local_peer_id, host_spawn_tile)
+	var host_actor_id: String = str(host_actor.get(EntityData.ACTOR_ID, "actor_peer_%d" % local_peer_id))
+	var host_display_name: String = str(host_actor.get(EntityData.NAME, host_name))
+	var host_player: Dictionary = SessionState.create_player(local_peer_id, host_display_name, MvpConstants.ROLE_GM, host_actor_id, host_owner_key, host_character_id)
 	SessionState.local_player_id = str(host_player.get(EntityData.PLAYER_ID, ""))
+	SessionState.local_owner_key = host_owner_key
+	SessionState.local_character_id = host_character_id
+	SessionState.set_local_character(host_character)
 	SessionState.local_actor_id = host_actor_id
 	SessionState.selected_actor_id = host_actor_id
-	SessionState.create_actor(host_actor_id, MvpConstants.ACTOR_KIND_PLAYER, host_name, Vector2i(-2, 7), "player", true, local_peer_id)
+	SessionState.set_actor(host_actor)
 	SessionState.create_actor("actor_npc_goblin_1", MvpConstants.ACTOR_KIND_NPC, "Goblin", Vector2i(-5, 7), "npc", true, 0)
 	var accepted: Dictionary = {
 		"peer_id": local_peer_id,
-		"name": host_name,
+		"name": host_display_name,
 		"role": MvpConstants.ROLE_GM,
 		"player_id": SessionState.local_player_id,
 		"actor_id": host_actor_id,
+		"owner_key": host_owner_key,
+		"character_id": host_character_id,
+		"character": host_character.duplicate(true),
 	}
 	players_by_peer_id[local_peer_id] = accepted.duplicate(true)
 
 
-func _create_joined_player(peer_id: int, name: String, role: String) -> Dictionary:
-	var actor_id := "actor_peer_%d" % peer_id
-	var player: Dictionary = SessionState.create_player(peer_id, name, role, actor_id)
-	var spawn_tile := _get_player_spawn_tile()
-	SessionState.create_actor(actor_id, MvpConstants.ACTOR_KIND_PLAYER, name, spawn_tile, "player", true, peer_id)
+func _create_joined_player(peer_id: int, name: String, role: String, owner_key: String) -> Dictionary:
+	var character: Dictionary = CharacterService.get_or_create_character_for_owner(owner_key, name, "human")
+	var character_id: String = str(character.get("character_id", ""))
+	var spawn_tile: Vector2i = _get_character_spawn_tile(character, _get_player_spawn_tile())
+	var actor: Dictionary = CharacterService.character_to_actor(character, peer_id, spawn_tile)
+	var actor_id: String = str(actor.get(EntityData.ACTOR_ID, "actor_peer_%d" % peer_id))
+	var display_name: String = str(actor.get(EntityData.NAME, name))
+	var player: Dictionary = SessionState.create_player(peer_id, display_name, role, actor_id, owner_key, character_id)
+	SessionState.set_actor(actor)
 	return {
 		"peer_id": peer_id,
-		"name": name,
+		"name": display_name,
 		"role": role,
 		"player_id": str(player.get(EntityData.PLAYER_ID, "player_%d" % peer_id)),
 		"actor_id": actor_id,
+		"owner_key": owner_key,
+		"character_id": character_id,
+		"character": character.duplicate(true),
 	}
 
 
@@ -395,6 +473,15 @@ func _get_player_spawn_tile() -> Vector2i:
 		if TileRules.is_walkable(tile) and not TileRules.is_occupied(tile):
 			return tile
 	return Vector2i(-3, 7)
+
+
+func _get_character_spawn_tile(character: Dictionary, fallback_tile: Vector2i) -> Vector2i:
+	var last_tile: Vector2i = _as_vector2i(character.get("last_tile", fallback_tile))
+	if TileRules.is_walkable(last_tile) and not TileRules.is_occupied(last_tile):
+		return last_tile
+	if TileRules.is_walkable(fallback_tile) and not TileRules.is_occupied(fallback_tile):
+		return fallback_tile
+	return _get_player_spawn_tile()
 
 
 func _broadcast_snapshot() -> void:
@@ -763,10 +850,17 @@ func c2s_join_request(payload: Dictionary) -> void:
 	if peer_id == 0:
 		peer_id = local_peer_id
 	var name := _normalize_player_name(str(payload.get("name", "")))
+	var owner_key: String = _owner_key_from_client_id(peer_id, str(payload.get("client_id", "")))
 	var role := MvpConstants.ROLE_GM if peer_id == local_peer_id else MvpConstants.ROLE_PLAYER
-	var accepted := _create_joined_player(peer_id, name, role)
+	var accepted := _create_joined_player(peer_id, name, role, owner_key)
 	players_by_peer_id[peer_id] = accepted.duplicate(true)
-	print("join request received: peer=%d name=%s role=%s" % [peer_id, name, role])
+	print("join request received: peer=%d name=%s role=%s owner=%s character=%s" % [
+		peer_id,
+		name,
+		role,
+		owner_key,
+		str(accepted.get("character_id", "")),
+	])
 	if peer_id == local_peer_id:
 		s2c_join_accepted(accepted)
 		s2c_state_snapshot(SessionState.serialize_snapshot())
@@ -950,6 +1044,13 @@ func s2c_join_accepted(payload: Dictionary) -> void:
 	SessionState.is_network_mode = true
 	SessionState.local_peer_id = local_peer_id
 	SessionState.local_player_id = str(payload.get("player_id", ""))
+	SessionState.local_owner_key = str(payload.get("owner_key", ""))
+	SessionState.local_character_id = str(payload.get("character_id", ""))
+	var raw_character_payload: Variant = payload.get("character", {})
+	if raw_character_payload is Dictionary:
+		var character_payload: Dictionary = raw_character_payload as Dictionary
+		if not character_payload.is_empty():
+			SessionState.set_local_character(character_payload)
 	SessionState.local_role = str(payload.get("role", ""))
 	SessionState.local_actor_id = str(payload.get("actor_id", ""))
 	SessionState.selected_actor_id = SessionState.local_actor_id

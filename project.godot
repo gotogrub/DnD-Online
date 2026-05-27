@@ -21,6 +21,8 @@ config/icon="res://icon.png"
 
 [autoload]
 
+RaceRegistry="*res://scripts/autoload/RaceRegistry.gd"
+CharacterService="*res://scripts/server/CharacterService.gd"
 NetworkService="*res://scripts/autoload/NetworkService.gd"
 SessionState="*res://scripts/autoload/SessionState.gd"
 TileRules="*res://scripts/autoload/TileRules.gd"
