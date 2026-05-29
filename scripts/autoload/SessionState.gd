@@ -10,9 +10,12 @@ signal actor_removed(actor_id: String)
 signal chat_message_added(message: Dictionary)
 signal encounter_changed(encounter_state: Dictionary)
 signal local_character_changed(character: Dictionary)
+signal character_list_changed(payload: Dictionary)
 
 var players := {}
 var actors := {}
+var available_characters: Array = []
+var last_character_id := ""
 var selected_actor_id := ""
 var local_peer_id := 0
 var local_player_id := ""
@@ -22,6 +25,8 @@ var local_character: Dictionary = {}
 var local_role := ""
 var local_actor_id := ""
 var is_network_mode := false
+var is_joined := false
+var is_character_selecting := false
 var encounter := {}
 var map_id := ""
 var chat_log: Array = []
@@ -35,6 +40,8 @@ func reset() -> void:
 func reset_all() -> void:
 	players.clear()
 	actors.clear()
+	available_characters.clear()
+	last_character_id = ""
 	selected_actor_id = ""
 	local_peer_id = 0
 	local_player_id = ""
@@ -44,12 +51,15 @@ func reset_all() -> void:
 	local_role = ""
 	local_actor_id = ""
 	is_network_mode = false
+	is_joined = false
+	is_character_selecting = false
 	actor_sequence = 0
 	chat_log.clear()
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	encounter = _default_encounter()
 	actors_changed.emit()
 	local_character_changed.emit({})
+	character_list_changed.emit({})
 	state_changed.emit()
 
 
@@ -58,6 +68,8 @@ func reset_local_debug_state() -> void:
 	selected_actor_id = ""
 	if not is_network_mode:
 		players.clear()
+		available_characters.clear()
+		last_character_id = ""
 		local_peer_id = 0
 		local_player_id = ""
 		local_owner_key = ""
@@ -65,10 +77,13 @@ func reset_local_debug_state() -> void:
 		local_character.clear()
 		local_role = ""
 		local_actor_id = ""
+		is_joined = false
+		is_character_selecting = false
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	actors_changed.emit()
 	if not is_network_mode:
 		local_character_changed.emit({})
+		character_list_changed.emit({})
 	state_changed.emit()
 
 
@@ -109,6 +124,25 @@ func set_local_character(character: Dictionary) -> void:
 
 func get_local_character() -> Dictionary:
 	return local_character.duplicate(true)
+
+
+func set_character_list(payload: Dictionary) -> void:
+	is_network_mode = true
+	if not is_joined:
+		is_character_selecting = true
+	var raw_characters: Variant = payload.get("characters", [])
+	if raw_characters is Array:
+		available_characters = (raw_characters as Array).duplicate(true)
+	else:
+		available_characters = []
+	last_character_id = str(payload.get("last_character_id", ""))
+	local_owner_key = str(payload.get("owner_key", local_owner_key))
+	character_list_changed.emit(payload.duplicate(true))
+	state_changed.emit()
+
+
+func get_available_characters() -> Array:
+	return available_characters.duplicate(true)
 
 
 func has_actor(actor_id: String) -> bool:
@@ -256,6 +290,16 @@ func remove_player(peer_id: int) -> void:
 
 func get_player(peer_id: int) -> Dictionary:
 	return players.get(peer_id, {}).duplicate(true)
+
+
+func is_character_active(character_id: String) -> bool:
+	if character_id.is_empty():
+		return false
+	for raw_player in players.values():
+		var player: Dictionary = raw_player as Dictionary
+		if str(player.get(EntityData.CHARACTER_ID, "")) == character_id:
+			return true
+	return false
 
 
 func get_role(peer_id: int) -> String:

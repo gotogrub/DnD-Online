@@ -87,6 +87,49 @@ func normalize_character_name(character_name: String) -> String:
 	return normalized_name.substr(0, MvpConstants.MAX_NAME_LENGTH)
 
 
+func validate_character_create_payload(payload: Dictionary) -> Dictionary:
+	var raw_name: String = str(payload.get("name", "")).strip_edges()
+	if raw_name.is_empty():
+		return _validation_error("name is required")
+	if raw_name.length() > MvpConstants.MAX_NAME_LENGTH:
+		return _validation_error("name is too long")
+	var raw_race_id: String = str(payload.get("race_id", "")).strip_edges().to_lower()
+	if raw_race_id.is_empty() or not RaceRegistry.has_race(raw_race_id):
+		return _validation_error("invalid race")
+	var raw_base_stats: Variant = payload.get("base_stats", {})
+	if not (raw_base_stats is Dictionary):
+		return _validation_error("invalid base stats")
+	var base_stats_data: Dictionary = raw_base_stats as Dictionary
+	var clean_stats: Dictionary = {}
+	var spent_points: int = 0
+	for stat_key: String in RaceRegistry.BASE_STAT_KEYS:
+		if not base_stats_data.has(stat_key):
+			return _validation_error("missing %s" % stat_key.to_upper())
+		var raw_value: Variant = base_stats_data.get(stat_key)
+		var raw_type: int = typeof(raw_value)
+		if raw_type != TYPE_INT and raw_type != TYPE_FLOAT:
+			return _validation_error("%s must be a number" % stat_key.to_upper())
+		var stat_value: int = int(raw_value)
+		if stat_value < MvpConstants.CHARACTER_STAT_MIN or stat_value > MvpConstants.CHARACTER_STAT_MAX:
+			return _validation_error("%s must be between %d and %d" % [
+				stat_key.to_upper(),
+				MvpConstants.CHARACTER_STAT_MIN,
+				MvpConstants.CHARACTER_STAT_MAX,
+			])
+		clean_stats[stat_key] = stat_value
+		spent_points += stat_value - MvpConstants.DEFAULT_BASE_STAT
+	if spent_points > MvpConstants.CHARACTER_POINT_BUY_POINTS:
+		return _validation_error("too many stat points")
+	return {
+		"ok": true,
+		"error": "",
+		"name": raw_name,
+		"race_id": raw_race_id,
+		"base_stats": clean_stats,
+		"points_spent": spent_points,
+	}
+
+
 func normalize_owner_key(owner_key: String) -> String:
 	var normalized_owner_key: String = owner_key.strip_edges()
 	if normalized_owner_key.is_empty():
@@ -109,6 +152,63 @@ func load_characters_for_owner(owner_key: String) -> Array[Dictionary]:
 		if not character.is_empty():
 			characters.append(character)
 	return characters
+
+
+func load_character_summaries_for_owner(owner_key: String) -> Array[Dictionary]:
+	var characters: Array[Dictionary] = load_characters_for_owner(owner_key)
+	var summaries: Array[Dictionary] = []
+	for character: Dictionary in characters:
+		summaries.append(get_character_summary(character))
+	summaries.sort_custom(_sort_character_summaries)
+	return summaries
+
+
+func get_character_summary(character: Dictionary) -> Dictionary:
+	var race_id: String = RaceRegistry.normalize_race_id(str(character.get("race_id", "human")))
+	var race: Dictionary = RaceRegistry.get_race(race_id)
+	return {
+		"character_id": str(character.get("character_id", "")),
+		"name": str(character.get("name", "Player")),
+		"race_id": race_id,
+		"race_name": str(race.get("name", race_id)),
+		"level": int(character.get("level", 1)),
+		"last_used_at": int(character.get("last_used_at", 0)),
+		"sprite": str(character.get("sprite", race.get("sprite", MvpConstants.DEFAULT_PLAYER_SPRITE))),
+	}
+
+
+func get_last_character_id(owner_key: String) -> String:
+	var characters: Array[Dictionary] = load_characters_for_owner(owner_key)
+	if characters.is_empty():
+		return ""
+	var selected: Dictionary = _select_last_used_character(characters)
+	return str(selected.get("character_id", ""))
+
+
+func delete_character_for_owner(owner_key: String, character_id: String) -> Dictionary:
+	var normalized_owner_key: String = normalize_owner_key(owner_key)
+	var safe_character_id: String = _safe_file_id(character_id)
+	if safe_character_id.is_empty():
+		return _validation_error("character id is required")
+	var character: Dictionary = load_character(safe_character_id)
+	if character.is_empty():
+		return _validation_error("character not found")
+	if normalize_owner_key(str(character.get("owner_key", ""))) != normalized_owner_key:
+		return _validation_error("character belongs to another owner")
+	var character_path: String = _character_path(safe_character_id)
+	if FileAccess.file_exists(character_path):
+		var remove_error: int = DirAccess.remove_absolute(character_path)
+		if remove_error != OK:
+			return _validation_error("could not delete character file")
+	var character_ids: Array[String] = load_owner_index(normalized_owner_key)
+	if character_ids.has(safe_character_id):
+		character_ids.erase(safe_character_id)
+	save_owner_index(normalized_owner_key, character_ids)
+	return {
+		"ok": true,
+		"error": "",
+		"character_id": safe_character_id,
+	}
 
 
 func save_character(character: Dictionary) -> void:
@@ -197,6 +297,17 @@ func _select_last_used_character(characters: Array[Dictionary]) -> Dictionary:
 			selected = character
 			selected_last_used = last_used
 	return selected
+
+
+func _sort_character_summaries(a: Dictionary, b: Dictionary) -> bool:
+	return int(a.get("last_used_at", 0)) > int(b.get("last_used_at", 0))
+
+
+func _validation_error(error: String) -> Dictionary:
+	return {
+		"ok": false,
+		"error": error,
+	}
 
 
 func _add_character_to_owner_index(owner_key: String, character_id: String) -> void:

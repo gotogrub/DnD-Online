@@ -17,6 +17,12 @@ signal move_rejected(payload: Dictionary)
 signal chat_message_received(payload: Dictionary)
 signal system_message_received(payload: Dictionary)
 signal roll_result_received(payload: Dictionary)
+signal character_list_received(payload: Dictionary)
+signal character_created(payload: Dictionary)
+signal character_create_rejected(payload: Dictionary)
+signal character_select_rejected(payload: Dictionary)
+signal character_deleted(payload: Dictionary)
+signal character_delete_rejected(payload: Dictionary)
 
 const NPC_TYPES := {
 	"goblin": {
@@ -58,6 +64,7 @@ var server_port := MvpConstants.DEFAULT_PORT
 var player_name := ""
 var client_id := ""
 var players_by_peer_id := {}
+var pending_joins := {}
 var client_move_seq := 0
 var moving_actor_ids := {}
 var client_visual_moving_actor_ids := {}
@@ -76,6 +83,7 @@ func start_server(port: int) -> bool:
 	is_connected = true
 	local_peer_id = multiplayer.get_unique_id()
 	players_by_peer_id.clear()
+	pending_joins.clear()
 	server_port = port
 	var host_name := _normalize_player_name(player_name)
 	if host_name == "Player":
@@ -84,7 +92,8 @@ func start_server(port: int) -> bool:
 	_connect_multiplayer_signals()
 	_emit_status("server started on port %d" % port)
 	server_started.emit(port)
-	s2c_state_snapshot(SessionState.serialize_snapshot())
+	var pending: Dictionary = _add_pending_join(local_peer_id, host_name, client_id, MvpConstants.ROLE_GM)
+	_send_character_list(local_peer_id, str(pending.get("owner_key", "")))
 	return true
 
 
@@ -138,8 +147,8 @@ func receive_server_snapshot(snapshot: Dictionary) -> void:
 
 
 func request_move(actor_id: String, to_tile: Vector2i) -> bool:
-	if not SessionState.is_network_mode:
-		print("move request ignored: not in network mode")
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("move request ignored: not joined")
 		return false
 	if actor_id.is_empty():
 		print("move request ignored: no actor selected")
@@ -179,8 +188,8 @@ func request_chat_message(message: String) -> bool:
 	if clean_message.is_empty():
 		print("chat ignored: empty message")
 		return false
-	if not SessionState.is_network_mode:
-		var payload: Dictionary = _system_payload("chat requires network session")
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		var payload: Dictionary = _system_payload("chat requires joined session")
 		system_message_received.emit(payload)
 		return false
 	if is_network_server():
@@ -195,8 +204,8 @@ func request_roll(expr: String) -> bool:
 	if clean_expr.is_empty():
 		print("roll ignored: empty expression")
 		return false
-	if not SessionState.is_network_mode:
-		var payload: Dictionary = _system_payload("roll requires network session")
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		var payload: Dictionary = _system_payload("roll requires joined session")
 		system_message_received.emit(payload)
 		return false
 	var request_payload: Dictionary = {
@@ -210,9 +219,68 @@ func request_roll(expr: String) -> bool:
 	return true
 
 
-func request_gm_spawn_npc(npc_type: String, npc_name: String, tile: Vector2i) -> bool:
+func request_create_character(payload: Dictionary) -> bool:
 	if not SessionState.is_network_mode:
-		print("spawn npc request ignored: not in network mode")
+		var system_payload: Dictionary = _system_payload("create character requires network session")
+		system_message_received.emit(system_payload)
+		return false
+	var request_payload: Dictionary = payload.duplicate(true)
+	print("create character request: name=%s race=%s" % [
+		str(request_payload.get("name", "")),
+		str(request_payload.get("race_id", "")),
+	])
+	if is_network_server():
+		c2s_create_character(request_payload)
+	else:
+		c2s_create_character.rpc_id(1, request_payload)
+	return true
+
+
+func request_select_character(character_id: String) -> bool:
+	var normalized_character_id: String = character_id.strip_edges()
+	if normalized_character_id.is_empty():
+		var payload: Dictionary = _system_payload("select character requires character_id")
+		system_message_received.emit(payload)
+		return false
+	if not SessionState.is_network_mode:
+		var system_payload: Dictionary = _system_payload("select character requires network session")
+		system_message_received.emit(system_payload)
+		return false
+	var request_payload: Dictionary = {
+		"character_id": normalized_character_id,
+	}
+	print("select character request: %s" % normalized_character_id)
+	if is_network_server():
+		c2s_select_character(request_payload)
+	else:
+		c2s_select_character.rpc_id(1, request_payload)
+	return true
+
+
+func request_delete_character(character_id: String) -> bool:
+	var normalized_character_id: String = character_id.strip_edges()
+	if normalized_character_id.is_empty():
+		var payload: Dictionary = _system_payload("delete character requires character_id")
+		system_message_received.emit(payload)
+		return false
+	if not SessionState.is_network_mode:
+		var system_payload: Dictionary = _system_payload("delete character requires network session")
+		system_message_received.emit(system_payload)
+		return false
+	var request_payload: Dictionary = {
+		"character_id": normalized_character_id,
+	}
+	print("delete character request: %s" % normalized_character_id)
+	if is_network_server():
+		c2s_delete_character(request_payload)
+	else:
+		c2s_delete_character.rpc_id(1, request_payload)
+	return true
+
+
+func request_gm_spawn_npc(npc_type: String, npc_name: String, tile: Vector2i) -> bool:
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("spawn npc request ignored: not joined")
 		return false
 	var payload: Dictionary = {
 		"npc_type": _normalize_npc_type(npc_type),
@@ -237,8 +305,8 @@ func request_gm_delete_actor(actor_id: String) -> bool:
 
 
 func request_gm_delete_actors(actor_ids: Array[String]) -> bool:
-	if not SessionState.is_network_mode:
-		print("delete actor request ignored: not in network mode")
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("delete actor request ignored: not joined")
 		return false
 	var normalized_actor_ids: Array[String] = []
 	for actor_id in actor_ids:
@@ -281,9 +349,11 @@ func _disconnect_peer() -> void:
 	is_connected = false
 	local_peer_id = 0
 	players_by_peer_id.clear()
+	pending_joins.clear()
 	client_move_seq = 0
 	moving_actor_ids.clear()
 	client_visual_moving_actor_ids.clear()
+	SessionState.reset_all()
 
 
 func _on_peer_connected(peer_id: int) -> void:
@@ -294,6 +364,7 @@ func _on_peer_connected(peer_id: int) -> void:
 func _on_peer_disconnected(peer_id: int) -> void:
 	print("peer disconnected: ", peer_id)
 	players_by_peer_id.erase(peer_id)
+	pending_joins.erase(peer_id)
 	peer_left.emit(peer_id)
 
 
@@ -391,64 +462,60 @@ func _owner_key_from_client_id(peer_id: int, identity_client_id: String) -> Stri
 	return normalized_client_id
 
 
-func _build_join_payload(peer_id: int, name: String, role: String, owner_key: String = "", character_id: String = "") -> Dictionary:
-	var player_id := "player_%d" % peer_id
-	var actor_id := "actor_peer_%d" % peer_id
-	return {
-		"peer_id": peer_id,
-		"name": _normalize_player_name(name),
-		"role": role,
-		"player_id": player_id,
-		"actor_id": actor_id,
-		"owner_key": owner_key,
-		"character_id": character_id,
-	}
-
-
 func _prepare_server_session(host_name: String) -> void:
 	SessionState.reset_all()
 	SessionState.is_network_mode = true
+	SessionState.is_joined = false
+	SessionState.is_character_selecting = true
 	SessionState.local_peer_id = local_peer_id
-	SessionState.local_role = MvpConstants.ROLE_GM
-	var host_owner_key: String = _owner_key_from_client_id(local_peer_id, client_id)
-	var host_character: Dictionary = CharacterService.get_or_create_character_for_owner(host_owner_key, host_name, "human")
-	var host_character_id: String = str(host_character.get("character_id", ""))
-	var host_spawn_tile: Vector2i = _get_character_spawn_tile(host_character, Vector2i(-2, 7))
-	var host_actor: Dictionary = CharacterService.character_to_actor(host_character, local_peer_id, host_spawn_tile)
-	var host_actor_id: String = str(host_actor.get(EntityData.ACTOR_ID, "actor_peer_%d" % local_peer_id))
-	var host_display_name: String = str(host_actor.get(EntityData.NAME, host_name))
-	var host_player: Dictionary = SessionState.create_player(local_peer_id, host_display_name, MvpConstants.ROLE_GM, host_actor_id, host_owner_key, host_character_id)
-	SessionState.local_player_id = str(host_player.get(EntityData.PLAYER_ID, ""))
-	SessionState.local_owner_key = host_owner_key
-	SessionState.local_character_id = host_character_id
-	SessionState.set_local_character(host_character)
-	SessionState.local_actor_id = host_actor_id
-	SessionState.selected_actor_id = host_actor_id
-	SessionState.set_actor(host_actor)
-	SessionState.create_actor("actor_npc_goblin_1", MvpConstants.ACTOR_KIND_NPC, "Goblin", Vector2i(-5, 7), "npc", true, 0)
-	var accepted: Dictionary = {
-		"peer_id": local_peer_id,
-		"name": host_display_name,
-		"role": MvpConstants.ROLE_GM,
-		"player_id": SessionState.local_player_id,
-		"actor_id": host_actor_id,
-		"owner_key": host_owner_key,
-		"character_id": host_character_id,
-		"character": host_character.duplicate(true),
+	SessionState.local_role = ""
+	SessionState.local_owner_key = _owner_key_from_client_id(local_peer_id, client_id)
+
+
+func _add_pending_join(peer_id: int, pending_name: String, pending_client_id: String, role: String) -> Dictionary:
+	var owner_key: String = _owner_key_from_client_id(peer_id, pending_client_id)
+	var pending: Dictionary = {
+		"peer_id": peer_id,
+		"name": _normalize_player_name(pending_name),
+		"role": role,
+		"owner_key": owner_key,
+		"client_id": _normalize_client_id(pending_client_id),
+		"requested_at": int(Time.get_unix_time_from_system()),
 	}
-	players_by_peer_id[local_peer_id] = accepted.duplicate(true)
+	pending_joins[peer_id] = pending.duplicate(true)
+	if peer_id == local_peer_id:
+		SessionState.is_network_mode = true
+		SessionState.is_joined = false
+		SessionState.is_character_selecting = true
+		SessionState.local_peer_id = peer_id
+		SessionState.local_owner_key = owner_key
+	print("pending join: peer=%d name=%s role=%s owner=%s" % [
+		peer_id,
+		str(pending.get("name", "")),
+		role,
+		owner_key,
+	])
+	return pending.duplicate(true)
 
 
-func _create_joined_player(peer_id: int, name: String, role: String, owner_key: String) -> Dictionary:
-	var character: Dictionary = CharacterService.get_or_create_character_for_owner(owner_key, name, "human")
+func _complete_join_with_character(peer_id: int, character: Dictionary) -> Dictionary:
+	var pending: Dictionary = pending_joins.get(peer_id, {}) as Dictionary
+	if pending.is_empty():
+		return {}
+	_ensure_starter_world()
+	var role: String = str(pending.get("role", MvpConstants.ROLE_PLAYER))
+	var owner_key: String = str(pending.get("owner_key", ""))
 	var character_id: String = str(character.get("character_id", ""))
 	var spawn_tile: Vector2i = _get_character_spawn_tile(character, _get_player_spawn_tile())
 	var actor: Dictionary = CharacterService.character_to_actor(character, peer_id, spawn_tile)
 	var actor_id: String = str(actor.get(EntityData.ACTOR_ID, "actor_peer_%d" % peer_id))
-	var display_name: String = str(actor.get(EntityData.NAME, name))
+	var display_name: String = str(actor.get(EntityData.NAME, pending.get("name", "Player")))
 	var player: Dictionary = SessionState.create_player(peer_id, display_name, role, actor_id, owner_key, character_id)
 	SessionState.set_actor(actor)
-	return {
+	character["last_used_at"] = int(Time.get_unix_time_from_system())
+	CharacterService.save_character(character)
+	_mark_character_last_for_owner(owner_key, character_id)
+	var accepted: Dictionary = {
 		"peer_id": peer_id,
 		"name": display_name,
 		"role": role,
@@ -458,6 +525,15 @@ func _create_joined_player(peer_id: int, name: String, role: String, owner_key: 
 		"character_id": character_id,
 		"character": character.duplicate(true),
 	}
+	pending_joins.erase(peer_id)
+	players_by_peer_id[peer_id] = accepted.duplicate(true)
+	if peer_id == local_peer_id:
+		s2c_join_accepted(accepted)
+	else:
+		s2c_join_accepted.rpc_id(peer_id, accepted)
+		_send_system_message(peer_id, "join accepted")
+	_broadcast_snapshot()
+	return accepted
 
 
 func _get_player_spawn_tile() -> Vector2i:
@@ -484,15 +560,57 @@ func _get_character_spawn_tile(character: Dictionary, fallback_tile: Vector2i) -
 	return _get_player_spawn_tile()
 
 
+func _ensure_starter_world() -> void:
+	if SessionState.has_actor("actor_npc_goblin_1"):
+		return
+	SessionState.create_actor("actor_npc_goblin_1", MvpConstants.ACTOR_KIND_NPC, "Goblin", Vector2i(-5, 7), "npc", true, 0)
+
+
+func _mark_character_last_for_owner(owner_key: String, character_id: String) -> void:
+	if character_id.is_empty():
+		return
+	var character_ids: Array[String] = CharacterService.load_owner_index(owner_key)
+	if character_ids.has(character_id):
+		character_ids.erase(character_id)
+	character_ids.append(character_id)
+	CharacterService.save_owner_index(owner_key, character_ids)
+
+
 func _broadcast_snapshot() -> void:
 	var snapshot: Dictionary = SessionState.serialize_snapshot()
 	print("broadcast snapshot: actors=%d players=%d" % [SessionState.get_actors().size(), SessionState.get_players().size()])
-	s2c_state_snapshot(snapshot)
 	for peer_id in players_by_peer_id.keys():
 		var target_peer_id := int(peer_id)
 		if target_peer_id == local_peer_id:
+			s2c_state_snapshot(snapshot)
 			continue
 		s2c_state_snapshot.rpc_id(target_peer_id, snapshot)
+
+
+func _build_character_list_payload(owner_key: String) -> Dictionary:
+	var normalized_owner_key: String = CharacterService.normalize_owner_key(owner_key)
+	return {
+		"owner_key": normalized_owner_key,
+		"characters": CharacterService.load_character_summaries_for_owner(normalized_owner_key),
+		"last_character_id": CharacterService.get_last_character_id(normalized_owner_key),
+	}
+
+
+func _send_character_list(peer_id: int, owner_key: String) -> void:
+	var payload: Dictionary = _build_character_list_payload(owner_key)
+	var raw_characters: Variant = payload.get("characters", [])
+	var character_count := 0
+	if raw_characters is Array:
+		character_count = (raw_characters as Array).size()
+	print("character list sent: peer=%d owner=%s count=%d" % [
+		peer_id,
+		str(payload.get("owner_key", "")),
+		character_count,
+	])
+	if peer_id == local_peer_id:
+		s2c_character_list(payload)
+	else:
+		s2c_character_list.rpc_id(peer_id, payload)
 
 
 func _broadcast_actor_moved(payload: Dictionary) -> void:
@@ -501,10 +619,10 @@ func _broadcast_actor_moved(payload: Dictionary) -> void:
 		str(payload.get("from_tile", Vector2i.ZERO)),
 		str(payload.get("to_tile", Vector2i.ZERO)),
 	])
-	s2c_actor_moved(payload)
 	for peer_id in players_by_peer_id.keys():
 		var target_peer_id := int(peer_id)
 		if target_peer_id == local_peer_id:
+			s2c_actor_moved(payload)
 			continue
 		s2c_actor_moved.rpc_id(target_peer_id, payload)
 
@@ -515,10 +633,10 @@ func _broadcast_chat_message(payload: Dictionary) -> void:
 		str(payload.get("name", "")),
 		str(payload.get("message", "")),
 	])
-	s2c_chat_message(payload)
 	for peer_id in players_by_peer_id.keys():
 		var target_peer_id := int(peer_id)
 		if target_peer_id == local_peer_id:
+			s2c_chat_message(payload)
 			continue
 		s2c_chat_message.rpc_id(target_peer_id, payload)
 
@@ -530,10 +648,10 @@ func _broadcast_roll_result(payload: Dictionary) -> void:
 		str(payload.get("normalized_expr", "")),
 		int(payload.get("total", 0)),
 	])
-	s2c_roll_result(payload)
 	for peer_id in players_by_peer_id.keys():
 		var target_peer_id := int(peer_id)
 		if target_peer_id == local_peer_id:
+			s2c_roll_result(payload)
 			continue
 		s2c_roll_result.rpc_id(target_peer_id, payload)
 
@@ -566,6 +684,66 @@ func _send_chat_rejected(peer_id: int, reason: String) -> void:
 func _send_roll_rejected(peer_id: int, reason: String) -> void:
 	print("roll rejected: peer=%d reason=%s" % [peer_id, reason])
 	_send_system_message(peer_id, "Roll rejected: %s" % reason)
+
+
+func _send_create_character_rejected(peer_id: int, reason: String) -> void:
+	var payload: Dictionary = {
+		"reason": reason,
+		"server_time": Time.get_unix_time_from_system(),
+	}
+	print("create character rejected: peer=%d reason=%s" % [peer_id, reason])
+	if peer_id == local_peer_id:
+		s2c_create_character_rejected(payload)
+	else:
+		s2c_create_character_rejected.rpc_id(peer_id, payload)
+
+
+func _send_select_character_rejected(peer_id: int, reason: String) -> void:
+	var payload: Dictionary = {
+		"reason": reason,
+		"server_time": Time.get_unix_time_from_system(),
+	}
+	print("select character rejected: peer=%d reason=%s" % [peer_id, reason])
+	if peer_id == local_peer_id:
+		s2c_select_character_rejected(payload)
+	else:
+		s2c_select_character_rejected.rpc_id(peer_id, payload)
+
+
+func _send_delete_character_rejected(peer_id: int, reason: String) -> void:
+	var payload: Dictionary = {
+		"reason": reason,
+		"server_time": Time.get_unix_time_from_system(),
+	}
+	print("delete character rejected: peer=%d reason=%s" % [peer_id, reason])
+	if peer_id == local_peer_id:
+		s2c_delete_character_rejected(payload)
+	else:
+		s2c_delete_character_rejected.rpc_id(peer_id, payload)
+
+
+func _send_character_created(peer_id: int, accepted_payload: Dictionary) -> void:
+	var payload: Dictionary = accepted_payload.duplicate(true)
+	print("character created accepted: peer=%d character=%s" % [
+		peer_id,
+		str(payload.get("character_id", "")),
+	])
+	if peer_id == local_peer_id:
+		s2c_character_created(payload)
+	else:
+		s2c_character_created.rpc_id(peer_id, payload)
+
+
+func _send_character_deleted(peer_id: int, character_id: String) -> void:
+	var payload: Dictionary = {
+		"character_id": character_id,
+		"server_time": Time.get_unix_time_from_system(),
+	}
+	print("character deleted accepted: peer=%d character=%s" % [peer_id, character_id])
+	if peer_id == local_peer_id:
+		s2c_character_deleted(payload)
+	else:
+		s2c_character_deleted.rpc_id(peer_id, payload)
 
 
 func _send_spawn_rejected(peer_id: int, reason: String) -> void:
@@ -834,6 +1012,41 @@ func _validate_gm_delete_requests(peer_id: int, actor_ids: Array[String]) -> Dic
 	return {"ok": true, "reason": "", "actors": actors_to_delete}
 
 
+func _validate_character_select_request(peer_id: int, character_id: String) -> Dictionary:
+	if character_id.is_empty():
+		return {"ok": false, "reason": "character not found"}
+	var pending: Dictionary = pending_joins.get(peer_id, {}) as Dictionary
+	if pending.is_empty():
+		return {"ok": false, "reason": "no pending join"}
+	var character: Dictionary = CharacterService.load_character(character_id)
+	if character.is_empty():
+		return {"ok": false, "reason": "character not found"}
+	var pending_owner_key: String = CharacterService.normalize_owner_key(str(pending.get("owner_key", "")))
+	var character_owner_key: String = CharacterService.normalize_owner_key(str(character.get("owner_key", "")))
+	if pending_owner_key != character_owner_key:
+		return {"ok": false, "reason": "character belongs to another owner"}
+	if _is_character_active_for_connected_peer(character_id, peer_id):
+		return {"ok": false, "reason": "character already active"}
+	return {
+		"ok": true,
+		"reason": "",
+		"character": character,
+	}
+
+
+func _is_character_active_for_connected_peer(character_id: String, peer_id: int) -> bool:
+	if character_id.is_empty():
+		return false
+	for raw_peer_id in players_by_peer_id.keys():
+		var connected_peer_id: int = int(raw_peer_id)
+		if connected_peer_id == peer_id:
+			continue
+		var player_payload: Dictionary = players_by_peer_id.get(raw_peer_id, {}) as Dictionary
+		if str(player_payload.get("character_id", "")) == character_id:
+			return true
+	return false
+
+
 func _system_payload(text: String) -> Dictionary:
 	return {
 		"kind": "system",
@@ -846,28 +1059,24 @@ func _system_payload(text: String) -> Dictionary:
 func c2s_join_request(payload: Dictionary) -> void:
 	if not is_server:
 		return
-	var peer_id := multiplayer.get_remote_sender_id()
+	var peer_id: int = multiplayer.get_remote_sender_id()
 	if peer_id == 0:
 		peer_id = local_peer_id
-	var name := _normalize_player_name(str(payload.get("name", "")))
+	if players_by_peer_id.has(peer_id):
+		_send_system_message(peer_id, "Already joined")
+		return
+	var name: String = _normalize_player_name(str(payload.get("name", "")))
+	var raw_client_id: String = str(payload.get("client_id", ""))
 	var owner_key: String = _owner_key_from_client_id(peer_id, str(payload.get("client_id", "")))
-	var role := MvpConstants.ROLE_GM if peer_id == local_peer_id else MvpConstants.ROLE_PLAYER
-	var accepted := _create_joined_player(peer_id, name, role, owner_key)
-	players_by_peer_id[peer_id] = accepted.duplicate(true)
-	print("join request received: peer=%d name=%s role=%s owner=%s character=%s" % [
+	var role: String = MvpConstants.ROLE_GM if peer_id == local_peer_id else MvpConstants.ROLE_PLAYER
+	_add_pending_join(peer_id, name, raw_client_id, role)
+	print("join request received: peer=%d name=%s role=%s owner=%s" % [
 		peer_id,
 		name,
 		role,
 		owner_key,
-		str(accepted.get("character_id", "")),
 	])
-	if peer_id == local_peer_id:
-		s2c_join_accepted(accepted)
-		s2c_state_snapshot(SessionState.serialize_snapshot())
-	else:
-		s2c_join_accepted.rpc_id(peer_id, accepted)
-		_send_system_message(peer_id, "join accepted")
-	_broadcast_snapshot()
+	_send_character_list(peer_id, owner_key)
 
 
 @rpc("any_peer", "reliable")
@@ -914,6 +1123,110 @@ func c2s_roll_request(payload: Dictionary) -> void:
 	var expr: String = str(payload.get("expr", ""))
 	print("roll request received: peer=%d expr=%s" % [peer_id, expr])
 	_handle_roll_request(peer_id, expr)
+
+
+@rpc("any_peer", "reliable")
+func c2s_create_character(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	if players_by_peer_id.has(peer_id):
+		_send_create_character_rejected(peer_id, "select/create is only available before entering game")
+		return
+	var pending: Dictionary = pending_joins.get(peer_id, {}) as Dictionary
+	if pending.is_empty():
+		_send_create_character_rejected(peer_id, "no pending join")
+		return
+	var owner_key: String = CharacterService.normalize_owner_key(str(pending.get("owner_key", "")))
+	if owner_key.is_empty() or owner_key == "unknown":
+		_send_create_character_rejected(peer_id, "owner key is missing")
+		return
+	var validation: Dictionary = CharacterService.validate_character_create_payload(payload)
+	if not bool(validation.get("ok", false)):
+		_send_create_character_rejected(peer_id, str(validation.get("error", "invalid character")))
+		return
+	var character: Dictionary = CharacterService.create_character(
+		owner_key,
+		str(validation.get("name", "")),
+		str(validation.get("race_id", "human")),
+		validation.get("base_stats", {}) as Dictionary
+	)
+	_send_character_list(peer_id, owner_key)
+	var accepted: Dictionary = _complete_join_with_character(peer_id, character)
+	if accepted.is_empty():
+		_send_create_character_rejected(peer_id, "could not activate character")
+		return
+	print("character created: peer=%d owner=%s character=%s name=%s" % [
+		peer_id,
+		owner_key,
+		str(character.get("character_id", "")),
+		str(character.get("name", "")),
+	])
+	_send_character_created(peer_id, accepted)
+	_send_system_message(peer_id, "Character created: %s" % str(character.get("name", "Character")))
+
+
+@rpc("any_peer", "reliable")
+func c2s_select_character(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var character_id: String = str(payload.get("character_id", "")).strip_edges()
+	var validation: Dictionary = _validate_character_select_request(peer_id, character_id)
+	if not bool(validation.get("ok", false)):
+		_send_select_character_rejected(peer_id, str(validation.get("reason", "select character rejected")))
+		return
+	var character: Dictionary = validation.get("character", {}) as Dictionary
+	var accepted: Dictionary = _complete_join_with_character(peer_id, character)
+	if accepted.is_empty():
+		_send_select_character_rejected(peer_id, "could not enter game")
+		return
+	print("character selected: peer=%d character=%s name=%s" % [
+		peer_id,
+		character_id,
+		str(character.get("name", "")),
+	])
+
+
+@rpc("any_peer", "reliable")
+func c2s_delete_character(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var character_id: String = str(payload.get("character_id", "")).strip_edges()
+	if character_id.is_empty():
+		_send_delete_character_rejected(peer_id, "character id is required")
+		return
+	if players_by_peer_id.has(peer_id):
+		_send_delete_character_rejected(peer_id, "delete is only available before entering game")
+		return
+	var pending: Dictionary = pending_joins.get(peer_id, {}) as Dictionary
+	if pending.is_empty():
+		_send_delete_character_rejected(peer_id, "no pending join")
+		return
+	if SessionState.is_character_active(character_id):
+		_send_delete_character_rejected(peer_id, "character is already active")
+		return
+	var owner_key: String = CharacterService.normalize_owner_key(str(pending.get("owner_key", "")))
+	var result: Dictionary = CharacterService.delete_character_for_owner(owner_key, character_id)
+	if not bool(result.get("ok", false)):
+		_send_delete_character_rejected(peer_id, str(result.get("error", "delete character rejected")))
+		return
+	var deleted_character_id: String = str(result.get("character_id", character_id))
+	print("character deleted: peer=%d owner=%s character=%s" % [
+		peer_id,
+		owner_key,
+		deleted_character_id,
+	])
+	_send_character_list(peer_id, owner_key)
+	_send_character_deleted(peer_id, deleted_character_id)
+	_send_system_message(peer_id, "Character deleted")
 
 
 @rpc("any_peer", "reliable")
@@ -1042,6 +1355,8 @@ func _handle_gm_delete_actors(peer_id: int, actor_ids: Array[String]) -> void:
 func s2c_join_accepted(payload: Dictionary) -> void:
 	local_peer_id = int(payload.get("peer_id", local_peer_id))
 	SessionState.is_network_mode = true
+	SessionState.is_joined = true
+	SessionState.is_character_selecting = false
 	SessionState.local_peer_id = local_peer_id
 	SessionState.local_player_id = str(payload.get("player_id", ""))
 	SessionState.local_owner_key = str(payload.get("owner_key", ""))
@@ -1057,6 +1372,74 @@ func s2c_join_accepted(payload: Dictionary) -> void:
 	print("join accepted: ", payload)
 	join_accepted.emit(payload.duplicate(true))
 	_emit_status("join accepted")
+
+
+@rpc("authority", "reliable")
+func s2c_character_list(payload: Dictionary) -> void:
+	var raw_characters: Variant = payload.get("characters", [])
+	var character_count := 0
+	if raw_characters is Array:
+		character_count = (raw_characters as Array).size()
+	print("character list received: characters=%d owner=%s last=%s" % [
+		character_count,
+		str(payload.get("owner_key", "")),
+		str(payload.get("last_character_id", "")),
+	])
+	SessionState.set_character_list(payload)
+	character_list_received.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_character_created(payload: Dictionary) -> void:
+	var raw_character_payload: Variant = payload.get("character", {})
+	if raw_character_payload is Dictionary:
+		var character_payload: Dictionary = raw_character_payload as Dictionary
+		if not character_payload.is_empty():
+			SessionState.set_local_character(character_payload)
+	SessionState.local_peer_id = int(payload.get("peer_id", SessionState.local_peer_id))
+	SessionState.local_player_id = str(payload.get("player_id", SessionState.local_player_id))
+	SessionState.local_owner_key = str(payload.get("owner_key", SessionState.local_owner_key))
+	SessionState.local_character_id = str(payload.get("character_id", SessionState.local_character_id))
+	SessionState.local_actor_id = str(payload.get("actor_id", SessionState.local_actor_id))
+	SessionState.selected_actor_id = SessionState.local_actor_id
+	print("character created accepted: ", payload)
+	character_created.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_create_character_rejected(payload: Dictionary) -> void:
+	var reason: String = str(payload.get("reason", "invalid character"))
+	print("create character rejected: ", reason)
+	character_create_rejected.emit(payload.duplicate(true))
+	var system_payload: Dictionary = _system_payload("Create character rejected: %s" % reason)
+	SessionState.add_chat_message(system_payload)
+	system_message_received.emit(system_payload)
+
+
+@rpc("authority", "reliable")
+func s2c_select_character_rejected(payload: Dictionary) -> void:
+	var reason: String = str(payload.get("reason", "select character rejected"))
+	print("select character rejected: ", reason)
+	character_select_rejected.emit(payload.duplicate(true))
+	var system_payload: Dictionary = _system_payload("Select character rejected: %s" % reason)
+	SessionState.add_chat_message(system_payload)
+	system_message_received.emit(system_payload)
+
+
+@rpc("authority", "reliable")
+func s2c_character_deleted(payload: Dictionary) -> void:
+	print("character deleted accepted: ", payload)
+	character_deleted.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_delete_character_rejected(payload: Dictionary) -> void:
+	var reason: String = str(payload.get("reason", "delete character rejected"))
+	print("delete character rejected: ", reason)
+	character_delete_rejected.emit(payload.duplicate(true))
+	var system_payload: Dictionary = _system_payload("Delete character rejected: %s" % reason)
+	SessionState.add_chat_message(system_payload)
+	system_message_received.emit(system_payload)
 
 
 @rpc("authority", "reliable")
@@ -1090,6 +1473,9 @@ func s2c_roll_result(payload: Dictionary) -> void:
 
 @rpc("authority", "reliable")
 func s2c_state_snapshot(snapshot: Dictionary) -> void:
+	if SessionState.is_network_mode and not SessionState.is_joined:
+		print("state snapshot ignored: character not selected")
+		return
 	var snapshot_actors := snapshot.get("actors", {}) as Dictionary
 	var snapshot_players := snapshot.get("players", {}) as Dictionary
 	print("state snapshot received: actors=%d players=%d" % [

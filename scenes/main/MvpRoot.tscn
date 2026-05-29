@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/ProtoBoard.tscn" id="1_board"]
 [ext_resource type="PackedScene" path="res://scenes/ui/ConnectPanel.tscn" id="2_connect"]
@@ -8,6 +8,9 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/GMPanel.tscn" id="6_gm_panel"]
 [ext_resource type="PackedScene" path="res://scenes/ui/DicePanel.tscn" id="7_dice_panel"]
 [ext_resource type="PackedScene" path="res://scenes/ui/CharacterSheetPanel.tscn" id="8_character_sheet"]
+[ext_resource type="PackedScene" path="res://scenes/ui/CharacterListPanel.tscn" id="9_character_list"]
+[ext_resource type="PackedScene" path="res://scenes/ui/CreateCharacterPanel.tscn" id="10_create_character"]
+[ext_resource type="PackedScene" path="res://scenes/ui/MainMenuPanel.tscn" id="11_main_menu"]
 
 [node name="MvpRoot" type="Node"]
 script = ExtResource("5_script")
@@ -16,7 +19,31 @@ script = ExtResource("5_script")
 
 [node name="UI" type="CanvasLayer" parent="."]
 
+[node name="PreGameDim" type="ColorRect" parent="UI"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 0
+color = Color(0, 0, 0, 0.35)
+
+[node name="MainMenuPanel" parent="UI" instance=ExtResource("11_main_menu")]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -180.0
+offset_top = -80.0
+offset_right = 180.0
+offset_bottom = 80.0
+
 [node name="ConnectPanel" parent="UI" instance=ExtResource("2_connect")]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -180.0
+offset_top = -80.0
+offset_right = 180.0
+offset_bottom = 80.0
 
 [node name="ChatPanel" parent="UI" instance=ExtResource("3_chat")]
 anchor_top = 1.0
@@ -48,6 +75,26 @@ offset_top = 80.0
 offset_right = 1520.0
 offset_bottom = 410.0
 
+[node name="CharacterListPanel" parent="UI" instance=ExtResource("9_character_list")]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -210.0
+offset_top = -260.0
+offset_right = 210.0
+offset_bottom = 160.0
+
+[node name="CreateCharacterPanel" parent="UI" instance=ExtResource("10_create_character")]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -230.0
+offset_top = -300.0
+offset_right = 230.0
+offset_bottom = 260.0
+
 [node name="EncounterPanel" parent="UI" instance=ExtResource("4_encounter")]
 offset_left = 1520.0
 offset_right = 1920.0
@@ -64,5 +111,5 @@ offset_left = 1220.0
 offset_top = 8.0
 offset_right = 1900.0
 offset_bottom = 34.0
-text = "offline | peer: - | role: -"
+text = "main_menu | peer: - | role: -"
 horizontal_alignment = 2

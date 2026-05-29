@@ -32,6 +32,10 @@ const CLIENT_IDENTITY_PATH := "user://client_identity.json"
 const SERVER_DATA_ROOT := "user://server_data"
 const SERVER_CHARACTERS_DIR := "user://server_data/characters"
 const SERVER_OWNERS_DIR := "user://server_data/owners"
+const DEFAULT_BASE_STAT := 10
+const CHARACTER_STAT_MIN := 6
+const CHARACTER_STAT_MAX := 16
+const CHARACTER_POINT_BUY_POINTS := 8
 const BOUNDARY_ATLAS_COORDS := Vector2i(0, 1)
 const CARDINAL_DIRECTIONS := [
 	Vector2i(1, 0),

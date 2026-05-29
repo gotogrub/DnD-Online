@@ -17,8 +17,10 @@ var world_renderer: WorldRenderer
 func _ready() -> void:
 	TileRules.bind_board(self)
 	_setup_world_renderer()
-	if local_actor_debug_enabled:
+	if local_actor_debug_enabled and not SessionState.is_network_mode:
 		_setup_local_debug_state()
+	elif world_renderer:
+		world_renderer.render_full_state(SessionState.get_actors())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -69,6 +71,10 @@ func _handle_click_actor_debug(world_pos: Vector2, additive_select := false) -> 
 		print("is_walkable: ", walkable)
 		print("is_occupied: ", occupied)
 		print("selected_actor_id: ", selected_actor_id)
+	if SessionState.is_network_mode and not SessionState.is_joined:
+		if click_debug_enabled:
+			print("map click ignored: character not selected")
+		return
 	if _handle_gm_tool_click(tile, additive_select):
 		return
 	if SessionState.is_network_mode:

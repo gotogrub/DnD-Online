@@ -32,7 +32,9 @@ func normalize_race_id(race_id: String) -> String:
 	return normalized_race_id
 
 
-func base_stats(default_value: int = 1) -> Dictionary:
+func base_stats(default_value: int = -1) -> Dictionary:
+	if default_value < 0:
+		default_value = MvpConstants.DEFAULT_BASE_STAT
 	var stats: Dictionary = {}
 	for stat_key: String in BASE_STAT_KEYS:
 		stats[stat_key] = default_value
@@ -42,7 +44,7 @@ func base_stats(default_value: int = 1) -> Dictionary:
 func normalize_base_stats(base_stats_data: Dictionary) -> Dictionary:
 	var stats: Dictionary = {}
 	for stat_key: String in BASE_STAT_KEYS:
-		stats[stat_key] = int(base_stats_data.get(stat_key, 1))
+		stats[stat_key] = int(base_stats_data.get(stat_key, MvpConstants.DEFAULT_BASE_STAT))
 	return stats
 
 
