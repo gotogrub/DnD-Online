@@ -17,6 +17,10 @@ const PLAYER_ID := "player_id"
 const ACTOR_KIND := "actor_kind"
 const OWNER_KEY := "owner_key"
 const CHARACTER_ID := "character_id"
+const CONTAINER_ID := "container_id"
+const ITEMS := "items"
+const CREATED_BY_CHARACTER_ID := "created_by_character_id"
+const CREATED_AT := "created_at"
 
 
 static func make_player(peer_id: int, player_id: String, player_name: String, role: String, actor_id: String = "", owner_key: String = "", character_id: String = "") -> Dictionary:

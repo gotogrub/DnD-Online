@@ -270,6 +270,8 @@ func remove_item_from_character(character_id: String, item_uid: String, quantity
 		if str(item.get("item_uid", "")) != normalized_item_uid:
 			continue
 		var current_quantity: int = int(item.get("quantity", 1))
+		var removed_item: Dictionary = item.duplicate(true)
+		removed_item["quantity"] = min(quantity, current_quantity)
 		if quantity >= current_quantity:
 			items.remove_at(index)
 		else:
@@ -283,8 +285,26 @@ func remove_item_from_character(character_id: String, item_uid: String, quantity
 			"error": "",
 			"character": character.duplicate(true),
 			"inventory": _inventory_snapshot_from_character(character),
+			"removed_item": removed_item,
 		}
 	return _validation_error("item not found")
+
+
+func get_inventory_item(character_id: String, item_uid: String) -> Dictionary:
+	var normalized_item_uid: String = item_uid.strip_edges()
+	if normalized_item_uid.is_empty():
+		return {}
+	var character: Dictionary = load_character(character_id)
+	if character.is_empty():
+		return {}
+	character = ensure_character_inventory(character)
+	var inventory: Dictionary = character.get("inventory", {}) as Dictionary
+	var items: Array = inventory.get("items", []) as Array
+	for raw_item in items:
+		var item: Dictionary = raw_item as Dictionary
+		if str(item.get("item_uid", "")) == normalized_item_uid:
+			return item.duplicate(true)
+	return {}
 
 
 func get_inventory_for_character(character_id: String) -> Dictionary:

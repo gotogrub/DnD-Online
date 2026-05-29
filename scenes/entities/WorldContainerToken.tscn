@@ -1,0 +1,21 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/WorldContainerToken.gd" id="1_script"]
+
+[node name="WorldContainerToken" type="Node2D"]
+y_sort_enabled = true
+script = ExtResource("1_script")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+y_sort_enabled = true
+
+[node name="NameLabel" type="Label" parent="."]
+z_index = 4096
+z_as_relative = false
+offset_left = -110.0
+offset_top = -72.0
+offset_right = 110.0
+offset_bottom = -48.0
+mouse_filter = 2
+horizontal_alignment = 1
+vertical_alignment = 1

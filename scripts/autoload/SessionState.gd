@@ -12,9 +12,11 @@ signal encounter_changed(encounter_state: Dictionary)
 signal local_character_changed(character: Dictionary)
 signal character_list_changed(payload: Dictionary)
 signal local_inventory_changed(inventory: Dictionary)
+signal world_containers_changed()
 
 var players := {}
 var actors := {}
+var world_containers := {}
 var available_characters: Array = []
 var last_character_id := ""
 var selected_actor_id := ""
@@ -33,6 +35,7 @@ var encounter := {}
 var map_id := ""
 var chat_log: Array = []
 var actor_sequence := 0
+var container_sequence := 0
 
 
 func reset() -> void:
@@ -42,6 +45,7 @@ func reset() -> void:
 func reset_all() -> void:
 	players.clear()
 	actors.clear()
+	world_containers.clear()
 	available_characters.clear()
 	last_character_id = ""
 	selected_actor_id = ""
@@ -57,10 +61,12 @@ func reset_all() -> void:
 	is_joined = false
 	is_character_selecting = false
 	actor_sequence = 0
+	container_sequence = 0
 	chat_log.clear()
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	encounter = _default_encounter()
 	actors_changed.emit()
+	world_containers_changed.emit()
 	local_character_changed.emit({})
 	local_inventory_changed.emit({})
 	character_list_changed.emit({})
@@ -69,6 +75,7 @@ func reset_all() -> void:
 
 func reset_local_debug_state() -> void:
 	actors.clear()
+	world_containers.clear()
 	selected_actor_id = ""
 	if not is_network_mode:
 		players.clear()
@@ -86,6 +93,7 @@ func reset_local_debug_state() -> void:
 		is_character_selecting = false
 	map_id = MvpConstants.DEFAULT_MAP_ID
 	actors_changed.emit()
+	world_containers_changed.emit()
 	if not is_network_mode:
 		local_character_changed.emit({})
 		local_inventory_changed.emit({})
@@ -97,6 +105,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	map_id = str(snapshot.get("map_id", MvpConstants.DEFAULT_MAP_ID))
 	players = snapshot.get("players", {}).duplicate(true)
 	actors = snapshot.get("actors", {}).duplicate(true)
+	world_containers = snapshot.get("world_containers", {}).duplicate(true)
 	encounter = snapshot.get("encounter", _default_encounter()).duplicate(true)
 	chat_log = snapshot.get("chat_log", []).duplicate(true)
 	if is_network_mode and not local_actor_id.is_empty() and actors.has(local_actor_id):
@@ -104,6 +113,7 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	else:
 		selected_actor_id = str(snapshot.get("selected_actor_id", selected_actor_id))
 	actors_changed.emit()
+	world_containers_changed.emit()
 	state_changed.emit()
 
 
@@ -116,6 +126,7 @@ func serialize_snapshot() -> Dictionary:
 		"map_id": map_id,
 		"players": players.duplicate(true),
 		"actors": actors.duplicate(true),
+		"world_containers": world_containers.duplicate(true),
 		"encounter": encounter.duplicate(true),
 	}
 
@@ -258,6 +269,50 @@ func get_actors() -> Dictionary:
 	return actors.duplicate(true)
 
 
+func get_world_containers() -> Dictionary:
+	return world_containers.duplicate(true)
+
+
+func create_or_merge_loot_bag(tile: Vector2i, dropped_items: Array, created_by_character_id: String) -> Dictionary:
+	if dropped_items.is_empty():
+		return {}
+	var container_id: String = _find_loot_bag_container_at_tile(tile)
+	if container_id.is_empty():
+		container_id = generate_container_id("container_loot_bag")
+		world_containers[container_id] = {
+			EntityData.CONTAINER_ID: container_id,
+			EntityData.KIND: MvpConstants.WORLD_CONTAINER_KIND_LOOT_BAG,
+			EntityData.NAME: "Dropped Items",
+			EntityData.TILE: tile,
+			EntityData.ITEMS: [],
+			EntityData.SPRITE: MvpConstants.DEFAULT_WORLD_CONTAINER_SPRITE,
+			EntityData.BLOCKS_TILE: false,
+			EntityData.CREATED_BY_CHARACTER_ID: created_by_character_id,
+			EntityData.CREATED_AT: int(Time.get_unix_time_from_system()),
+		}
+	var container: Dictionary = world_containers.get(container_id, {}) as Dictionary
+	var items: Array = _array_from_variant(container.get(EntityData.ITEMS, []))
+	for raw_item in dropped_items:
+		var item: Dictionary = raw_item as Dictionary
+		if item.is_empty():
+			continue
+		_merge_inventory_item_into(items, item)
+	container[EntityData.ITEMS] = items
+	world_containers[container_id] = container.duplicate(true)
+	world_containers_changed.emit()
+	state_changed.emit()
+	return container.duplicate(true)
+
+
+func generate_container_id(prefix: String = "container") -> String:
+	container_sequence += 1
+	var candidate: String = "%s_%d" % [prefix, container_sequence]
+	while world_containers.has(candidate):
+		container_sequence += 1
+		candidate = "%s_%d" % [prefix, container_sequence]
+	return candidate
+
+
 func find_actor_at_tile(tile: Vector2i) -> String:
 	var fallback_actor_id := ""
 	for raw_actor in actors.values():
@@ -370,6 +425,40 @@ func _dictionary_from_variant(value: Variant) -> Dictionary:
 	if value is Dictionary:
 		return (value as Dictionary).duplicate(true)
 	return {}
+
+
+func _find_loot_bag_container_at_tile(tile: Vector2i) -> String:
+	for raw_container in world_containers.values():
+		var container: Dictionary = raw_container as Dictionary
+		if str(container.get(EntityData.KIND, "")) != MvpConstants.WORLD_CONTAINER_KIND_LOOT_BAG:
+			continue
+		if container.get(EntityData.TILE, Vector2i.ZERO) == tile:
+			return str(container.get(EntityData.CONTAINER_ID, ""))
+	return ""
+
+
+func _merge_inventory_item_into(items: Array, incoming_item: Dictionary) -> void:
+	var item_id: String = str(incoming_item.get("item_id", "")).strip_edges().to_lower()
+	var quantity: int = int(incoming_item.get("quantity", 0))
+	if item_id.is_empty() or quantity <= 0:
+		return
+	if ItemRegistry.has_item(item_id) and bool(ItemRegistry.get_item(item_id).get("stackable", false)):
+		for index: int in range(items.size()):
+			var item: Dictionary = items[index] as Dictionary
+			if str(item.get("item_id", "")) != item_id:
+				continue
+			if not str(item.get("custom_name", "")).is_empty():
+				continue
+			if not str(item.get("custom_description", "")).is_empty():
+				continue
+			if not str(incoming_item.get("custom_name", "")).is_empty():
+				continue
+			if not str(incoming_item.get("custom_description", "")).is_empty():
+				continue
+			item["quantity"] = int(item.get("quantity", 0)) + quantity
+			items[index] = item
+			return
+	items.append(incoming_item.duplicate(true))
 
 
 func _resolve_actor_sprite(kind: String, sprite: String) -> String:

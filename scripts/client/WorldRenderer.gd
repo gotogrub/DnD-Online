@@ -3,10 +3,13 @@ class_name WorldRenderer
 ## Renders server snapshots onto the local ProtoCRPG board without owning state.
 
 const TOKEN_SCENE := preload("res://scenes/entities/Token2D.tscn")
+const CONTAINER_SCENE := preload("res://scenes/entities/WorldContainerToken.tscn")
 
 var board: Node
 var token_root: Node2D
+var container_root: Node2D
 var token_by_actor_id := {}
+var token_by_container_id := {}
 var visually_moving_actor_ids := {}
 
 
@@ -14,17 +17,23 @@ func bind_board(new_board: Node) -> void:
 	board = new_board
 	TileRules.bind_board(board)
 	token_root = null
+	container_root = null
 	if board:
 		if board.has_method("get_tokens_root"):
 			token_root = board.get_tokens_root() as Node2D
 		else:
 			token_root = board.get_node_or_null("Tokens") as Node2D
+		if board.has_method("get_containers_root"):
+			container_root = board.get_containers_root() as Node2D
+		else:
+			container_root = board.get_node_or_null("Containers") as Node2D
 	_connect_session_state()
 
 
 func render_full_state(actors: Dictionary) -> void:
 	if not token_root:
 		return
+	render_world_containers(SessionState.get_world_containers())
 	var stale_ids := token_by_actor_id.keys()
 	for actor_id in actors.keys():
 		spawn_or_update_actor(actors[actor_id])
@@ -34,6 +43,19 @@ func render_full_state(actors: Dictionary) -> void:
 	_sync_gm_selection_with_state()
 	_update_selected_markers()
 	print("actors rendered: ", token_by_actor_id.size())
+
+
+func render_world_containers(containers: Dictionary) -> void:
+	if not container_root:
+		return
+	var stale_ids := token_by_container_id.keys()
+	for container_id in containers.keys():
+		spawn_or_update_container(containers[container_id])
+		stale_ids.erase(container_id)
+	for container_id in stale_ids:
+		remove_container(str(container_id))
+	if token_by_container_id.size() > 0:
+		print("containers rendered: ", token_by_container_id.size())
 
 
 func spawn_or_update_actor(actor: Dictionary) -> Node2D:
@@ -57,6 +79,25 @@ func spawn_or_update_actor(actor: Dictionary) -> Node2D:
 		token.apply_actor_data(actor)
 	var selected_active: bool = SessionState.local_role == MvpConstants.ROLE_GM and GMToolState.has_selected_actor(actor_id)
 	_update_token_selected(actor_id, token, selected_active)
+	return token
+
+
+func spawn_or_update_container(container: Dictionary) -> Node2D:
+	if not container_root:
+		return null
+	var container_id := str(container.get(EntityData.CONTAINER_ID, ""))
+	if container_id.is_empty():
+		return null
+	var token := token_by_container_id.get(container_id) as Node2D
+	if not is_instance_valid(token):
+		token = CONTAINER_SCENE.instantiate() as Node2D
+		if not token:
+			return null
+		token.name = container_id
+		container_root.add_child(token)
+		token_by_container_id[container_id] = token
+	if token.has_method("apply_container_state"):
+		token.apply_container_state(container)
 	return token
 
 
@@ -109,6 +150,13 @@ func remove_actor(actor_id: String) -> void:
 		token.queue_free()
 
 
+func remove_container(container_id: String) -> void:
+	var token := token_by_container_id.get(container_id) as Node
+	token_by_container_id.erase(container_id)
+	if is_instance_valid(token):
+		token.queue_free()
+
+
 func is_actor_visually_moving(actor_id: String) -> bool:
 	return visually_moving_actor_ids.has(actor_id)
 
@@ -129,6 +177,8 @@ func _connect_session_state() -> void:
 		SessionState.actor_moved.connect(_on_actor_moved)
 	if not SessionState.actor_removed.is_connected(_on_actor_removed):
 		SessionState.actor_removed.connect(_on_actor_removed)
+	if not SessionState.world_containers_changed.is_connected(_on_world_containers_changed):
+		SessionState.world_containers_changed.connect(_on_world_containers_changed)
 	if not NetworkService.move_rejected.is_connected(_on_move_rejected):
 		NetworkService.move_rejected.connect(_on_move_rejected)
 	if not NetworkService.actor_moved_received.is_connected(_on_actor_moved_received):
@@ -139,6 +189,10 @@ func _connect_session_state() -> void:
 
 func _on_actors_changed() -> void:
 	render_full_state(SessionState.get_actors())
+
+
+func _on_world_containers_changed() -> void:
+	render_world_containers(SessionState.get_world_containers())
 
 
 func _on_actor_moved(actor_id: String, _from_tile: Vector2i, to_tile: Vector2i) -> void:

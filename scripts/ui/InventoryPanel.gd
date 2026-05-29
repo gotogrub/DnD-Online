@@ -21,7 +21,9 @@ func _ready() -> void:
 	use_button.pressed.connect(_on_action_pressed.bind("Use is not implemented yet."))
 	equip_button.pressed.connect(_on_action_pressed.bind("Equip is not implemented yet."))
 	use_on_button.pressed.connect(_on_action_pressed.bind("Use On is not implemented yet."))
-	drop_button.pressed.connect(_on_action_pressed.bind("Drop is coming with world items."))
+	drop_button.pressed.connect(_on_drop_pressed)
+	if not NetworkService.system_message_received.is_connected(_on_system_message_received):
+		NetworkService.system_message_received.connect(_on_system_message_received)
 	refresh()
 
 
@@ -116,6 +118,24 @@ func _set_action_buttons(actions: Array[String]) -> void:
 
 func _on_action_pressed(message: String) -> void:
 	status_label.text = message
+
+
+func _on_drop_pressed() -> void:
+	var item: Dictionary = _find_item_by_uid(selected_item_uid)
+	if item.is_empty():
+		status_label.text = "Select item first."
+		return
+	var quantity: int = int(item.get("quantity", 1))
+	if not NetworkService.request_drop_inventory_item(selected_item_uid, quantity):
+		status_label.text = "Could not send drop request."
+		return
+	status_label.text = "Drop request sent."
+
+
+func _on_system_message_received(payload: Dictionary) -> void:
+	var message: String = str(payload.get("message", ""))
+	if message.begins_with("Dropped") or message.begins_with("Drop rejected"):
+		status_label.text = message
 
 
 func _inventory_items() -> Array:

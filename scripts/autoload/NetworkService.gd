@@ -341,6 +341,26 @@ func request_inventory() -> bool:
 	return true
 
 
+func request_drop_inventory_item(item_uid: String, quantity: int) -> bool:
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("drop item request ignored: not joined")
+		return false
+	var normalized_item_uid: String = item_uid.strip_edges()
+	if normalized_item_uid.is_empty():
+		print("drop item request ignored: no item selected")
+		return false
+	var payload: Dictionary = {
+		"item_uid": normalized_item_uid,
+		"quantity": quantity,
+	}
+	print("drop item request: item_uid=%s quantity=%d" % [normalized_item_uid, quantity])
+	if is_network_server():
+		c2s_drop_inventory_item(payload)
+	else:
+		c2s_drop_inventory_item.rpc_id(1, payload)
+	return true
+
+
 func request_player_list() -> bool:
 	if not SessionState.is_network_mode or not SessionState.is_joined:
 		print("player list request ignored: not joined")
@@ -628,7 +648,11 @@ func _mark_character_last_for_owner(owner_key: String, character_id: String) -> 
 
 func _broadcast_snapshot() -> void:
 	var snapshot: Dictionary = SessionState.serialize_snapshot()
-	print("broadcast snapshot: actors=%d players=%d" % [SessionState.get_actors().size(), SessionState.get_players().size()])
+	print("broadcast snapshot: actors=%d players=%d containers=%d" % [
+		SessionState.get_actors().size(),
+		SessionState.get_players().size(),
+		SessionState.get_world_containers().size(),
+	])
 	for peer_id in players_by_peer_id.keys():
 		var target_peer_id := int(peer_id)
 		if target_peer_id == local_peer_id:
@@ -861,6 +885,11 @@ func _send_delete_rejected(peer_id: int, reason: String) -> void:
 func _send_give_item_rejected(peer_id: int, reason: String) -> void:
 	print("give item rejected: peer=%d reason=%s" % [peer_id, reason])
 	_send_system_message(peer_id, "Give item rejected: %s" % reason)
+
+
+func _send_drop_item_rejected(peer_id: int, reason: String) -> void:
+	print("drop item rejected: peer=%d reason=%s" % [peer_id, reason])
+	_send_system_message(peer_id, "Drop rejected: %s" % reason)
 
 
 func _lock_actor_movement(actor_id: String, step_count: int) -> void:
@@ -1151,6 +1180,45 @@ func _validate_gm_give_item_request(peer_id: int, character_id: String, item_id:
 	}
 
 
+func _validate_drop_inventory_item_request(peer_id: int, item_uid: String, quantity: int) -> Dictionary:
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty():
+		return {"ok": false, "reason": "peer is not registered"}
+	var actor_id: String = str(player.get(EntityData.ACTOR_ID, ""))
+	if actor_id.is_empty() or not SessionState.has_actor(actor_id):
+		return {"ok": false, "reason": "player actor not found"}
+	var actor: Dictionary = SessionState.get_actor(actor_id)
+	var character_id: String = str(player.get(EntityData.CHARACTER_ID, ""))
+	if character_id.is_empty():
+		return {"ok": false, "reason": "no character selected"}
+	if item_uid.is_empty():
+		return {"ok": false, "reason": "item uid is required"}
+	var inventory_item: Dictionary = CharacterService.get_inventory_item(character_id, item_uid)
+	if inventory_item.is_empty():
+		return {"ok": false, "reason": "item not found"}
+	var item_id: String = str(inventory_item.get("item_id", ""))
+	if item_id.is_empty() or not ItemRegistry.has_item(item_id):
+		return {"ok": false, "reason": "invalid item"}
+	var actions: Array[String] = ItemRegistry.get_item_actions(item_id)
+	if not actions.has("drop"):
+		return {"ok": false, "reason": "item cannot be dropped"}
+	var available_quantity: int = int(inventory_item.get("quantity", 1))
+	if quantity <= 0 or quantity > available_quantity:
+		return {"ok": false, "reason": "invalid quantity"}
+	var tile: Vector2i = _actor_tile(actor)
+	if not TileRules.has_tile(tile):
+		return {"ok": false, "reason": "actor tile does not exist"}
+	return {
+		"ok": true,
+		"reason": "",
+		"actor": actor,
+		"character_id": character_id,
+		"item": inventory_item,
+		"item_id": item_id,
+		"tile": tile,
+	}
+
+
 func _validate_character_select_request(peer_id: int, character_id: String) -> Dictionary:
 	if character_id.is_empty():
 		return {"ok": false, "reason": "character not found"}
@@ -1290,6 +1358,53 @@ func c2s_request_inventory() -> void:
 		_send_system_message(peer_id, "Inventory rejected: no character selected")
 		return
 	_send_inventory_snapshot(peer_id, character_id)
+
+
+@rpc("any_peer", "reliable")
+func c2s_drop_inventory_item(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var item_uid: String = str(payload.get("item_uid", "")).strip_edges()
+	var quantity: int = int(payload.get("quantity", 0))
+	print("drop item request received: peer=%d item_uid=%s quantity=%d" % [
+		peer_id,
+		item_uid,
+		quantity,
+	])
+	var validation: Dictionary = _validate_drop_inventory_item_request(peer_id, item_uid, quantity)
+	if not bool(validation.get("ok", false)):
+		_send_drop_item_rejected(peer_id, str(validation.get("reason", "invalid request")))
+		return
+	var character_id: String = str(validation.get("character_id", ""))
+	var remove_result: Dictionary = CharacterService.remove_item_from_character(character_id, item_uid, quantity)
+	if not bool(remove_result.get("ok", false)):
+		_send_drop_item_rejected(peer_id, str(remove_result.get("error", "could not remove item")))
+		return
+	var dropped_item: Dictionary = remove_result.get("removed_item", {}) as Dictionary
+	if dropped_item.is_empty():
+		_send_drop_item_rejected(peer_id, "could not drop item")
+		return
+	var tile: Vector2i = _as_vector2i(validation.get("tile", Vector2i.ZERO))
+	var container: Dictionary = SessionState.create_or_merge_loot_bag(tile, [dropped_item], character_id)
+	if container.is_empty():
+		_send_drop_item_rejected(peer_id, "could not create loot container")
+		return
+	var item_id: String = str(dropped_item.get("item_id", validation.get("item_id", "")))
+	var item_name: String = ItemRegistry.get_item_display_name(item_id)
+	var dropped_quantity: int = int(dropped_item.get("quantity", quantity))
+	print("item dropped: peer=%d item=%s quantity=%d tile=%s container=%s" % [
+		peer_id,
+		item_id,
+		dropped_quantity,
+		str(tile),
+		str(container.get(EntityData.CONTAINER_ID, "")),
+	])
+	_broadcast_snapshot()
+	_send_inventory_snapshot(peer_id, character_id)
+	_send_system_message(peer_id, "Dropped %s x%d" % [item_name, dropped_quantity])
 
 
 @rpc("any_peer", "reliable")
@@ -1720,9 +1835,11 @@ func s2c_state_snapshot(snapshot: Dictionary) -> void:
 		return
 	var snapshot_actors := snapshot.get("actors", {}) as Dictionary
 	var snapshot_players := snapshot.get("players", {}) as Dictionary
-	print("state snapshot received: actors=%d players=%d" % [
+	var snapshot_containers := snapshot.get("world_containers", {}) as Dictionary
+	print("state snapshot received: actors=%d players=%d containers=%d" % [
 		snapshot_actors.size(),
 		snapshot_players.size(),
+		snapshot_containers.size(),
 	])
 	receive_server_snapshot(snapshot)
 

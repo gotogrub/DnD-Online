@@ -12,6 +12,7 @@ signal tile_clicked(tile: Vector2i)
 @onready var map_background: Sprite2D = $MapBackground
 @onready var layer0: TileMapLayer = $Layer0
 @onready var layer1: TileMapLayer = $Layer1
+@onready var containers: Node2D = $Containers
 @onready var tokens: Node2D = $Tokens
 
 var world_renderer: WorldRenderer
@@ -56,6 +57,10 @@ func has_tile(tile: Vector2i) -> bool:
 
 func get_tokens_root() -> Node2D:
 	return tokens
+
+
+func get_containers_root() -> Node2D:
+	return containers
 
 
 func get_world_renderer() -> WorldRenderer:
