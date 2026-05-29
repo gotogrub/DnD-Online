@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/world/ProtoBoard.tscn" id="1_board"]
 [ext_resource type="PackedScene" path="res://scenes/ui/ConnectPanel.tscn" id="2_connect"]
@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/CharacterListPanel.tscn" id="9_character_list"]
 [ext_resource type="PackedScene" path="res://scenes/ui/CreateCharacterPanel.tscn" id="10_create_character"]
 [ext_resource type="PackedScene" path="res://scenes/ui/MainMenuPanel.tscn" id="11_main_menu"]
+[ext_resource type="PackedScene" path="res://scenes/ui/InventoryPanel.tscn" id="12_inventory"]
 
 [node name="MvpRoot" type="Node"]
 script = ExtResource("5_script")
@@ -69,11 +70,25 @@ offset_right = 1512.0
 offset_bottom = 72.0
 text = "Character"
 
+[node name="InventoryButton" type="Button" parent="UI"]
+visible = false
+offset_left = 1520.0
+offset_top = 40.0
+offset_right = 1620.0
+offset_bottom = 72.0
+text = "Inventory"
+
 [node name="CharacterSheetPanel" parent="UI" instance=ExtResource("8_character_sheet")]
 offset_left = 1220.0
 offset_top = 80.0
 offset_right = 1520.0
 offset_bottom = 410.0
+
+[node name="InventoryPanel" parent="UI" instance=ExtResource("12_inventory")]
+offset_left = 940.0
+offset_top = 80.0
+offset_right = 1500.0
+offset_bottom = 460.0
 
 [node name="CharacterListPanel" parent="UI" instance=ExtResource("9_character_list")]
 anchor_left = 0.5
@@ -104,7 +119,7 @@ offset_bottom = 180.0
 offset_left = 1520.0
 offset_top = 196.0
 offset_right = 1900.0
-offset_bottom = 480.0
+offset_bottom = 580.0
 
 [node name="DebugStatus" type="Label" parent="UI"]
 offset_left = 1220.0

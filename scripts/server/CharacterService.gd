@@ -28,6 +28,7 @@ func create_character(owner_key: String, character_name: String, race_id: String
 		},
 		"sprite": str(race.get("sprite", MvpConstants.DEFAULT_PLAYER_SPRITE)),
 		"last_tile": Vector2i(-2, 7),
+		"inventory": _default_inventory(),
 		"created_at": now,
 		"last_used_at": now,
 	}
@@ -211,8 +212,92 @@ func delete_character_for_owner(owner_key: String, character_id: String) -> Dict
 	}
 
 
+func ensure_character_inventory(character: Dictionary) -> Dictionary:
+	var normalized_character: Dictionary = character.duplicate(true)
+	normalized_character["inventory"] = _normalize_inventory(normalized_character.get("inventory", {}))
+	return normalized_character
+
+
+func add_item_to_character(character_id: String, item_id: String, quantity: int) -> Dictionary:
+	var normalized_item_id: String = item_id.strip_edges().to_lower()
+	if normalized_item_id.is_empty() or not ItemRegistry.has_item(normalized_item_id):
+		return _validation_error("invalid item")
+	if quantity <= 0 or quantity > MvpConstants.MAX_ITEM_GIVE_QUANTITY:
+		return _validation_error("invalid quantity")
+	var character: Dictionary = load_character(character_id)
+	if character.is_empty():
+		return _validation_error("character not found")
+	character = ensure_character_inventory(character)
+	var inventory: Dictionary = character.get("inventory", {}) as Dictionary
+	var items: Array = inventory.get("items", []) as Array
+	var template: Dictionary = ItemRegistry.get_item(normalized_item_id)
+	if bool(template.get("stackable", false)):
+		var stack_index: int = _find_stackable_item_index(items, normalized_item_id)
+		if stack_index >= 0:
+			var stack_item: Dictionary = items[stack_index] as Dictionary
+			stack_item["quantity"] = int(stack_item.get("quantity", 0)) + quantity
+			items[stack_index] = stack_item
+		else:
+			items.append(_make_inventory_item(normalized_item_id, quantity))
+	else:
+		for _index: int in range(quantity):
+			items.append(_make_inventory_item(normalized_item_id, 1))
+	inventory["items"] = items
+	character["inventory"] = inventory
+	save_character(character)
+	return {
+		"ok": true,
+		"error": "",
+		"character": character.duplicate(true),
+		"inventory": _inventory_snapshot_from_character(character),
+	}
+
+
+func remove_item_from_character(character_id: String, item_uid: String, quantity: int) -> Dictionary:
+	var normalized_item_uid: String = item_uid.strip_edges()
+	if normalized_item_uid.is_empty():
+		return _validation_error("item uid is required")
+	if quantity <= 0:
+		return _validation_error("invalid quantity")
+	var character: Dictionary = load_character(character_id)
+	if character.is_empty():
+		return _validation_error("character not found")
+	character = ensure_character_inventory(character)
+	var inventory: Dictionary = character.get("inventory", {}) as Dictionary
+	var items: Array = inventory.get("items", []) as Array
+	for index: int in range(items.size()):
+		var item: Dictionary = items[index] as Dictionary
+		if str(item.get("item_uid", "")) != normalized_item_uid:
+			continue
+		var current_quantity: int = int(item.get("quantity", 1))
+		if quantity >= current_quantity:
+			items.remove_at(index)
+		else:
+			item["quantity"] = current_quantity - quantity
+			items[index] = item
+		inventory["items"] = items
+		character["inventory"] = inventory
+		save_character(character)
+		return {
+			"ok": true,
+			"error": "",
+			"character": character.duplicate(true),
+			"inventory": _inventory_snapshot_from_character(character),
+		}
+	return _validation_error("item not found")
+
+
+func get_inventory_for_character(character_id: String) -> Dictionary:
+	var character: Dictionary = load_character(character_id)
+	if character.is_empty():
+		return {}
+	character = ensure_character_inventory(character)
+	return _inventory_snapshot_from_character(character)
+
+
 func save_character(character: Dictionary) -> void:
-	var character_id: String = str(character.get("character_id", ""))
+	var normalized_character: Dictionary = ensure_character_inventory(character)
+	var character_id: String = str(normalized_character.get("character_id", ""))
 	if character_id.is_empty():
 		return
 	_ensure_storage_dirs()
@@ -220,7 +305,7 @@ func save_character(character: Dictionary) -> void:
 	if file == null:
 		push_warning("Could not save character: %s" % character_id)
 		return
-	file.store_string(JSON.stringify(_serialize_character(character), "\t"))
+	file.store_string(JSON.stringify(_serialize_character(normalized_character), "\t"))
 
 
 func load_character(character_id: String) -> Dictionary:
@@ -345,7 +430,7 @@ func _safe_file_id(value: String) -> String:
 
 
 func _serialize_character(character: Dictionary) -> Dictionary:
-	var payload: Dictionary = character.duplicate(true)
+	var payload: Dictionary = ensure_character_inventory(character)
 	payload["last_tile"] = _serialize_vector2i(_as_vector2i(payload.get("last_tile", Vector2i.ZERO)))
 	return payload
 
@@ -359,6 +444,7 @@ func _deserialize_character(payload: Dictionary) -> Dictionary:
 	character["derived_stats"] = derive_stats(character.get("base_stats", {}) as Dictionary, str(character.get("race_id", "human")))
 	character["current"] = _normalize_current(character.get("current", {}) as Dictionary, character.get("derived_stats", {}) as Dictionary)
 	character["last_tile"] = _as_vector2i(character.get("last_tile", Vector2i(-2, 7)))
+	character["inventory"] = _normalize_inventory(character.get("inventory", {}))
 	if str(character.get("sprite", "")).is_empty():
 		var race: Dictionary = RaceRegistry.get_race(str(character.get("race_id", "human")))
 		character["sprite"] = str(race.get("sprite", MvpConstants.DEFAULT_PLAYER_SPRITE))
@@ -372,6 +458,100 @@ func _normalize_current(current: Dictionary, derived_stats: Dictionary) -> Dicti
 		"hp": clampi(int(current.get("hp", max_hp)), 0, max_hp),
 		"ap": clampi(int(current.get("ap", max_ap)), 0, max_ap),
 	}
+
+
+func _default_inventory() -> Dictionary:
+	return {
+		"items": [],
+		"equipped": {
+			"weapon": "",
+			"armor": "",
+			"accessory": "",
+		},
+	}
+
+
+func _normalize_inventory(raw_inventory: Variant) -> Dictionary:
+	var inventory: Dictionary = _default_inventory()
+	if raw_inventory is Dictionary:
+		var inventory_data: Dictionary = raw_inventory as Dictionary
+		var raw_items: Variant = inventory_data.get("items", [])
+		if raw_items is Array:
+			var items: Array = []
+			for raw_item: Variant in raw_items:
+				var item: Dictionary = _normalize_inventory_item(raw_item)
+				if not item.is_empty():
+					items.append(item)
+			inventory["items"] = items
+		var raw_equipped: Variant = inventory_data.get("equipped", {})
+		if raw_equipped is Dictionary:
+			var equipped_data: Dictionary = raw_equipped as Dictionary
+			inventory["equipped"] = {
+				"weapon": str(equipped_data.get("weapon", "")),
+				"armor": str(equipped_data.get("armor", "")),
+				"accessory": str(equipped_data.get("accessory", "")),
+			}
+	return inventory
+
+
+func _normalize_inventory_item(raw_item: Variant) -> Dictionary:
+	if not (raw_item is Dictionary):
+		return {}
+	var item_data: Dictionary = raw_item as Dictionary
+	var item_id: String = str(item_data.get("item_id", "")).strip_edges().to_lower()
+	var quantity: int = int(item_data.get("quantity", 0))
+	if item_id.is_empty() or not ItemRegistry.has_item(item_id) or quantity <= 0:
+		return {}
+	var item_uid: String = str(item_data.get("item_uid", "")).strip_edges()
+	if item_uid.is_empty():
+		item_uid = _generate_item_uid(item_id)
+	return {
+		"item_uid": item_uid,
+		"item_id": item_id,
+		"quantity": quantity,
+		"custom_name": str(item_data.get("custom_name", "")),
+		"custom_description": str(item_data.get("custom_description", "")),
+	}
+
+
+func _make_inventory_item(item_id: String, quantity: int) -> Dictionary:
+	return {
+		"item_uid": _generate_item_uid(item_id),
+		"item_id": item_id,
+		"quantity": quantity,
+		"custom_name": "",
+		"custom_description": "",
+	}
+
+
+func _find_stackable_item_index(items: Array, item_id: String) -> int:
+	for index: int in range(items.size()):
+		var item: Dictionary = items[index] as Dictionary
+		if str(item.get("item_id", "")) != item_id:
+			continue
+		if not str(item.get("custom_name", "")).is_empty():
+			continue
+		if not str(item.get("custom_description", "")).is_empty():
+			continue
+		return index
+	return -1
+
+
+func _inventory_snapshot_from_character(character: Dictionary) -> Dictionary:
+	var inventory: Dictionary = _normalize_inventory(character.get("inventory", {}))
+	return {
+		"character_id": str(character.get("character_id", "")),
+		"items": (inventory.get("items", []) as Array).duplicate(true),
+		"equipped": (inventory.get("equipped", {}) as Dictionary).duplicate(true),
+	}
+
+
+func _generate_item_uid(item_id: String) -> String:
+	return "item_%s_%d_%06d" % [
+		_safe_file_id(item_id),
+		Time.get_ticks_msec(),
+		randi() % 1000000,
+	]
 
 
 func _serialize_vector2i(value: Vector2i) -> Dictionary:

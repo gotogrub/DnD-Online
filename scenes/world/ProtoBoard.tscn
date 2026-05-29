@@ -7,6 +7,11 @@
 y_sort_enabled = true
 script = ExtResource("1_script")
 
+[node name="MapBackground" type="Sprite2D" parent="."]
+z_index = -100
+position = Vector2(502, 223)
+scale = Vector2(1.45, 1.45)
+
 [node name="Layer1" type="TileMapLayer" parent="."]
 z_index = 1
 y_sort_enabled = true

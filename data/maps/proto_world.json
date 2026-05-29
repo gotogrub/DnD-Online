@@ -1,0 +1,46 @@
+{
+	"map_id": "proto_world",
+	"name": "Proto World",
+	"background_id": "stone",
+	"backgrounds": {
+		"black": {
+			"color": "#000000",
+			"texture": ""
+		},
+		"stone": {
+			"color": "#000000",
+			"texture": "res://tileset/map_backgrounds/stone.png",
+			"position": [502, 223],
+			"scale": 1.45,
+			"opacity": 1.0
+		},
+		"grass": {
+			"color": "#000000",
+			"texture": "res://tileset/map_backgrounds/grass.png",
+			"position": [502, 223],
+			"scale": 1.45,
+			"opacity": 1.0
+		},
+		"magic": {
+			"color": "#000000",
+			"texture": "res://tileset/map_backgrounds/magic.png",
+			"position": [502, 223],
+			"scale": 1.45,
+			"opacity": 1.0
+		},
+		"sky_city": {
+			"color": "#000000",
+			"texture": "res://tileset/map_backgrounds/sky_city.png",
+			"position": [502, 223],
+			"scale": 1.45,
+			"opacity": 1.0
+		},
+		"city_far": {
+			"color": "#000000",
+			"texture": "res://tileset/map_backgrounds/city_far.png",
+			"position": [502, 223],
+			"scale": 1.45,
+			"opacity": 1.0
+		}
+	}
+}

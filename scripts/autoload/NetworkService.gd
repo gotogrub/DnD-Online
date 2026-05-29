@@ -23,6 +23,8 @@ signal character_create_rejected(payload: Dictionary)
 signal character_select_rejected(payload: Dictionary)
 signal character_deleted(payload: Dictionary)
 signal character_delete_rejected(payload: Dictionary)
+signal inventory_snapshot_received(payload: Dictionary)
+signal player_list_received(payload: Dictionary)
 
 const NPC_TYPES := {
 	"goblin": {
@@ -328,6 +330,53 @@ func request_gm_delete_actors(actor_ids: Array[String]) -> bool:
 	return true
 
 
+func request_inventory() -> bool:
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("inventory request ignored: not joined")
+		return false
+	if is_network_server():
+		c2s_request_inventory()
+	else:
+		c2s_request_inventory.rpc_id(1)
+	return true
+
+
+func request_player_list() -> bool:
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("player list request ignored: not joined")
+		return false
+	if is_network_server():
+		c2s_request_player_list()
+	else:
+		c2s_request_player_list.rpc_id(1)
+	return true
+
+
+func request_gm_give_item_to_character(character_id: String, item_id: String, quantity: int) -> bool:
+	if not SessionState.is_network_mode or not SessionState.is_joined:
+		print("give item request ignored: not joined")
+		return false
+	var normalized_character_id: String = character_id.strip_edges()
+	var normalized_item_id: String = item_id.strip_edges().to_lower()
+	if normalized_character_id.is_empty():
+		print("give item request ignored: no player selected")
+		return false
+	if normalized_item_id.is_empty():
+		print("give item request ignored: no item selected")
+		return false
+	var payload: Dictionary = {
+		"character_id": normalized_character_id,
+		"item_id": normalized_item_id,
+		"quantity": quantity,
+	}
+	print("give item request: character=%s item=%s quantity=%d" % [normalized_character_id, normalized_item_id, quantity])
+	if is_network_server():
+		c2s_gm_give_item_to_character(payload)
+	else:
+		c2s_gm_give_item_to_character.rpc_id(1, payload)
+	return true
+
+
 func _connect_multiplayer_signals() -> void:
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
@@ -532,6 +581,7 @@ func _complete_join_with_character(peer_id: int, character: Dictionary) -> Dicti
 	else:
 		s2c_join_accepted.rpc_id(peer_id, accepted)
 		_send_system_message(peer_id, "join accepted")
+	_send_inventory_snapshot(peer_id, character_id)
 	_broadcast_snapshot()
 	return accepted
 
@@ -611,6 +661,29 @@ func _send_character_list(peer_id: int, owner_key: String) -> void:
 		s2c_character_list(payload)
 	else:
 		s2c_character_list.rpc_id(peer_id, payload)
+
+
+func _build_player_list_payload() -> Dictionary:
+	var rows: Array = []
+	var players: Dictionary = SessionState.get_players()
+	for raw_peer_id in players.keys():
+		var peer_id: int = int(raw_peer_id)
+		var player: Dictionary = players.get(raw_peer_id, {}) as Dictionary
+		var character_id: String = str(player.get(EntityData.CHARACTER_ID, ""))
+		if character_id.is_empty():
+			continue
+		rows.append({
+			"peer_id": peer_id,
+			"player_id": str(player.get(EntityData.PLAYER_ID, "")),
+			"character_id": character_id,
+			"actor_id": str(player.get(EntityData.ACTOR_ID, "")),
+			"name": str(player.get(EntityData.NAME, "Player")),
+			"role": str(player.get(EntityData.ROLE, MvpConstants.ROLE_PLAYER)),
+		})
+	return {
+		"players": rows,
+		"server_time": Time.get_unix_time_from_system(),
+	}
 
 
 func _broadcast_actor_moved(payload: Dictionary) -> void:
@@ -722,6 +795,35 @@ func _send_delete_character_rejected(peer_id: int, reason: String) -> void:
 		s2c_delete_character_rejected.rpc_id(peer_id, payload)
 
 
+func _send_inventory_snapshot(peer_id: int, character_id: String) -> void:
+	var payload: Dictionary = CharacterService.get_inventory_for_character(character_id)
+	if payload.is_empty():
+		_send_system_message(peer_id, "Inventory unavailable")
+		return
+	print("inventory snapshot sent: peer=%d character=%s items=%d" % [
+		peer_id,
+		character_id,
+		(payload.get("items", []) as Array).size(),
+	])
+	if peer_id == local_peer_id:
+		s2c_inventory_snapshot(payload)
+	else:
+		s2c_inventory_snapshot.rpc_id(peer_id, payload)
+
+
+func _send_player_list(peer_id: int) -> void:
+	var payload: Dictionary = _build_player_list_payload()
+	var raw_players: Variant = payload.get("players", [])
+	var player_count := 0
+	if raw_players is Array:
+		player_count = (raw_players as Array).size()
+	print("player list sent: peer=%d count=%d" % [peer_id, player_count])
+	if peer_id == local_peer_id:
+		s2c_player_list(payload)
+	else:
+		s2c_player_list.rpc_id(peer_id, payload)
+
+
 func _send_character_created(peer_id: int, accepted_payload: Dictionary) -> void:
 	var payload: Dictionary = accepted_payload.duplicate(true)
 	print("character created accepted: peer=%d character=%s" % [
@@ -754,6 +856,11 @@ func _send_spawn_rejected(peer_id: int, reason: String) -> void:
 func _send_delete_rejected(peer_id: int, reason: String) -> void:
 	print("delete rejected: peer=%d reason=%s" % [peer_id, reason])
 	_send_system_message(peer_id, "Delete rejected: %s" % reason)
+
+
+func _send_give_item_rejected(peer_id: int, reason: String) -> void:
+	print("give item rejected: peer=%d reason=%s" % [peer_id, reason])
+	_send_system_message(peer_id, "Give item rejected: %s" % reason)
 
 
 func _lock_actor_movement(actor_id: String, step_count: int) -> void:
@@ -1012,6 +1119,38 @@ func _validate_gm_delete_requests(peer_id: int, actor_ids: Array[String]) -> Dic
 	return {"ok": true, "reason": "", "actors": actors_to_delete}
 
 
+func _validate_gm_give_item_request(peer_id: int, character_id: String, item_id: String, quantity: int) -> Dictionary:
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty() or str(player.get(EntityData.ROLE, "")) != MvpConstants.ROLE_GM:
+		return {"ok": false, "reason": "gm role required"}
+	if character_id.is_empty():
+		return {"ok": false, "reason": "target player required"}
+	var target_peer_id: int = _connected_peer_for_character(character_id)
+	if target_peer_id == 0:
+		return {"ok": false, "reason": "target player is not connected"}
+	var target_player: Dictionary = SessionState.get_player(target_peer_id)
+	if target_player.is_empty():
+		return {"ok": false, "reason": "target player not found"}
+	var actor_id: String = str(target_player.get(EntityData.ACTOR_ID, ""))
+	if actor_id.is_empty() or not SessionState.has_actor(actor_id):
+		return {"ok": false, "reason": "target player actor not found"}
+	var actor: Dictionary = SessionState.get_actor(actor_id)
+	if str(actor.get(EntityData.KIND, "")) != MvpConstants.ACTOR_KIND_PLAYER:
+		return {"ok": false, "reason": "target actor is not a player"}
+	if item_id.is_empty() or not ItemRegistry.has_item(item_id):
+		return {"ok": false, "reason": "invalid item"}
+	if quantity <= 0 or quantity > MvpConstants.MAX_ITEM_GIVE_QUANTITY:
+		return {"ok": false, "reason": "invalid quantity"}
+	return {
+		"ok": true,
+		"reason": "",
+		"actor": actor,
+		"character_id": character_id,
+		"target_peer_id": target_peer_id,
+		"target_name": str(target_player.get(EntityData.NAME, actor.get(EntityData.NAME, "Player"))),
+	}
+
+
 func _validate_character_select_request(peer_id: int, character_id: String) -> Dictionary:
 	if character_id.is_empty():
 		return {"ok": false, "reason": "character not found"}
@@ -1045,6 +1184,16 @@ func _is_character_active_for_connected_peer(character_id: String, peer_id: int)
 		if str(player_payload.get("character_id", "")) == character_id:
 			return true
 	return false
+
+
+func _connected_peer_for_character(character_id: String) -> int:
+	if character_id.is_empty():
+		return 0
+	for raw_peer_id in players_by_peer_id.keys():
+		var player_payload: Dictionary = players_by_peer_id.get(raw_peer_id, {}) as Dictionary
+		if str(player_payload.get("character_id", "")) == character_id:
+			return int(raw_peer_id)
+	return 0
 
 
 func _system_payload(text: String) -> Dictionary:
@@ -1123,6 +1272,39 @@ func c2s_roll_request(payload: Dictionary) -> void:
 	var expr: String = str(payload.get("expr", ""))
 	print("roll request received: peer=%d expr=%s" % [peer_id, expr])
 	_handle_roll_request(peer_id, expr)
+
+
+@rpc("any_peer", "reliable")
+func c2s_request_inventory() -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty():
+		_send_system_message(peer_id, "Inventory rejected: peer is not registered")
+		return
+	var character_id: String = str(player.get(EntityData.CHARACTER_ID, ""))
+	if character_id.is_empty():
+		_send_system_message(peer_id, "Inventory rejected: no character selected")
+		return
+	_send_inventory_snapshot(peer_id, character_id)
+
+
+@rpc("any_peer", "reliable")
+func c2s_request_player_list() -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var player: Dictionary = SessionState.get_player(peer_id)
+	if player.is_empty() or str(player.get(EntityData.ROLE, "")) != MvpConstants.ROLE_GM:
+		_send_system_message(peer_id, "Player list rejected: gm role required")
+		return
+	print("player list request received: peer=%d" % peer_id)
+	_send_player_list(peer_id)
 
 
 @rpc("any_peer", "reliable")
@@ -1328,6 +1510,45 @@ func c2s_gm_delete_actors(payload: Dictionary) -> void:
 	_handle_gm_delete_actors(peer_id, actor_ids)
 
 
+@rpc("any_peer", "reliable")
+func c2s_gm_give_item_to_character(payload: Dictionary) -> void:
+	if not is_server:
+		return
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	if peer_id == 0:
+		peer_id = local_peer_id
+	var character_id: String = str(payload.get("character_id", "")).strip_edges()
+	var item_id: String = str(payload.get("item_id", "")).strip_edges().to_lower()
+	var quantity: int = int(payload.get("quantity", 0))
+	print("give item request received: peer=%d character=%s item=%s quantity=%d" % [
+		peer_id,
+		character_id,
+		item_id,
+		quantity,
+	])
+	var validation: Dictionary = _validate_gm_give_item_request(peer_id, character_id, item_id, quantity)
+	if not bool(validation.get("ok", false)):
+		_send_give_item_rejected(peer_id, str(validation.get("reason", "invalid request")))
+		return
+	var result: Dictionary = CharacterService.add_item_to_character(character_id, item_id, quantity)
+	if not bool(result.get("ok", false)):
+		_send_give_item_rejected(peer_id, str(result.get("error", "could not add item")))
+		return
+	var item_name: String = ItemRegistry.get_item_display_name(item_id)
+	var target_name: String = str(validation.get("target_name", "Player"))
+	print("inventory item added: gm_peer=%d target=%s item=%s quantity=%d" % [
+		peer_id,
+		target_name,
+		item_id,
+		quantity,
+	])
+	var target_peer_id: int = int(validation.get("target_peer_id", 0))
+	if target_peer_id != 0:
+		_send_inventory_snapshot(target_peer_id, character_id)
+		_send_system_message(target_peer_id, "Received %s x%d" % [item_name, quantity])
+	_send_system_message(peer_id, "Gave %s x%d to %s" % [item_name, quantity, target_name])
+
+
 func _handle_gm_delete_actors(peer_id: int, actor_ids: Array[String]) -> void:
 	print("delete actors request received: peer=%d actors=%s" % [peer_id, str(actor_ids)])
 	var validation: Dictionary = _validate_gm_delete_requests(peer_id, actor_ids)
@@ -1430,6 +1651,27 @@ func s2c_select_character_rejected(payload: Dictionary) -> void:
 func s2c_character_deleted(payload: Dictionary) -> void:
 	print("character deleted accepted: ", payload)
 	character_deleted.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_inventory_snapshot(payload: Dictionary) -> void:
+	var items: Array = payload.get("items", []) as Array
+	print("inventory snapshot received: character=%s items=%d" % [
+		str(payload.get("character_id", "")),
+		items.size(),
+	])
+	SessionState.set_local_inventory(payload)
+	inventory_snapshot_received.emit(payload.duplicate(true))
+
+
+@rpc("authority", "reliable")
+func s2c_player_list(payload: Dictionary) -> void:
+	var raw_players: Variant = payload.get("players", [])
+	var player_count := 0
+	if raw_players is Array:
+		player_count = (raw_players as Array).size()
+	print("player list received: players=%d" % player_count)
+	player_list_received.emit(payload.duplicate(true))
 
 
 @rpc("authority", "reliable")

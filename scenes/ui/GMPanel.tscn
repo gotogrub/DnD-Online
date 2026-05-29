@@ -4,9 +4,9 @@
 
 [node name="GMPanel" type="PanelContainer"]
 visible = false
-custom_minimum_size = Vector2(280, 260)
+custom_minimum_size = Vector2(280, 360)
 offset_right = 280.0
-offset_bottom = 260.0
+offset_bottom = 360.0
 script = ExtResource("1_script")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
@@ -44,6 +44,36 @@ text = "Move Selected"
 [node name="DeleteSelectedButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Delete Selected"
+
+[node name="ItemSeparator" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ItemTitle" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Give Item"
+
+[node name="PlayerOption" type="OptionButton" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ItemOption" type="OptionButton" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ItemQuantity" type="SpinBox" parent="VBoxContainer"]
+layout_mode = 2
+min_value = 1.0
+max_value = 9999.0
+value = 25.0
+rounded = true
+prefix = "Qty "
+
+[node name="GiveItemButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Give to Player"
+
+[node name="ItemStatusLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Select player, item and quantity"
+autowrap_mode = 2
 
 [node name="StatusLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2

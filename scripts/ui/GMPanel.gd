@@ -11,6 +11,11 @@ const NPC_TYPE_LABELS := ["Goblin", "Raider", "Guard", "Merchant"]
 @onready var select_actor_check_box: CheckBox = $VBoxContainer/SelectActorCheckBox
 @onready var move_selected_check_box: CheckBox = $VBoxContainer/MoveSelectedCheckBox
 @onready var delete_selected_button: Button = $VBoxContainer/DeleteSelectedButton
+@onready var player_option: OptionButton = $VBoxContainer/PlayerOption
+@onready var item_option: OptionButton = $VBoxContainer/ItemOption
+@onready var item_quantity: SpinBox = $VBoxContainer/ItemQuantity
+@onready var give_item_button: Button = $VBoxContainer/GiveItemButton
+@onready var item_status_label: Label = $VBoxContainer/ItemStatusLabel
 @onready var selected_label: Label = $VBoxContainer/SelectedLabel
 @onready var status_label: Label = $VBoxContainer/StatusLabel
 
@@ -18,15 +23,21 @@ const NPC_TYPE_LABELS := ["Goblin", "Raider", "Guard", "Merchant"]
 func _ready() -> void:
 	custom_name_input.max_length = MvpConstants.MAX_NAME_LENGTH
 	_populate_npc_types()
+	_populate_item_types()
+	_populate_player_targets_from_state()
+	item_quantity.max_value = MvpConstants.MAX_ITEM_GIVE_QUANTITY
 	npc_type_option.item_selected.connect(_on_npc_type_selected)
 	custom_name_input.text_changed.connect(_on_custom_name_changed)
 	spawn_mode_check_box.toggled.connect(_on_spawn_mode_toggled)
 	select_actor_check_box.toggled.connect(_on_select_actor_toggled)
 	move_selected_check_box.toggled.connect(_on_move_selected_toggled)
 	delete_selected_button.pressed.connect(_on_delete_selected_pressed)
+	player_option.pressed.connect(_on_player_option_pressed)
+	give_item_button.pressed.connect(_on_give_item_pressed)
 	GMToolState.tool_changed.connect(_on_tool_changed)
 	SessionState.actors_changed.connect(_on_actors_changed)
 	NetworkService.system_message_received.connect(_on_system_message_received)
+	NetworkService.player_list_received.connect(_on_player_list_received)
 	set_gm_visible(false)
 
 
@@ -39,6 +50,8 @@ func set_gm_visible(visible_for_gm: bool) -> void:
 		GMToolState.clear_gm_tool()
 		GMToolState.clear_selected_actor()
 		return
+	_populate_player_targets_from_state()
+	NetworkService.request_player_list()
 	_update_status_from_tool()
 
 
@@ -54,11 +67,90 @@ func _populate_npc_types() -> void:
 	npc_type_option.select(0)
 
 
+func _populate_item_types() -> void:
+	item_option.clear()
+	var items: Array = ItemRegistry.get_all_items()
+	for raw_item in items:
+		var item: Dictionary = raw_item as Dictionary
+		var item_id: String = str(item.get("item_id", ""))
+		if item_id.is_empty():
+			continue
+		item_option.add_item(str(item.get("name", item_id)))
+		item_option.set_item_metadata(item_option.get_item_count() - 1, item_id)
+	if item_option.get_item_count() > 0:
+		item_option.select(0)
+
+
 func _selected_npc_type() -> String:
 	var selected_index: int = npc_type_option.selected
 	if selected_index < 0 or selected_index >= NPC_TYPE_KEYS.size():
 		return "goblin"
 	return str(NPC_TYPE_KEYS[selected_index])
+
+
+func _selected_item_id() -> String:
+	var selected_index: int = item_option.selected
+	if selected_index < 0 or selected_index >= item_option.get_item_count():
+		return ""
+	return str(item_option.get_item_metadata(selected_index))
+
+
+func _selected_target_character_id() -> String:
+	var selected_index: int = player_option.selected
+	if selected_index < 0 or selected_index >= player_option.get_item_count():
+		return ""
+	return str(player_option.get_item_metadata(selected_index))
+
+
+func _populate_player_targets_from_state() -> void:
+	var rows: Array = []
+	var players: Dictionary = SessionState.get_players()
+	for raw_peer_id in players.keys():
+		var peer_id: int = int(raw_peer_id)
+		var player: Dictionary = players.get(raw_peer_id, {}) as Dictionary
+		var character_id: String = str(player.get(EntityData.CHARACTER_ID, ""))
+		if character_id.is_empty():
+			continue
+		rows.append({
+			"peer_id": peer_id,
+			"character_id": character_id,
+			"name": str(player.get(EntityData.NAME, "Player")),
+			"role": str(player.get(EntityData.ROLE, MvpConstants.ROLE_PLAYER)),
+		})
+	_populate_player_targets(rows)
+
+
+func _populate_player_targets(players: Array) -> void:
+	var previous_character_id: String = _selected_target_character_id()
+	if previous_character_id.is_empty():
+		previous_character_id = SessionState.local_character_id
+	player_option.clear()
+	var selected_index := 0
+	for raw_player in players:
+		var player: Dictionary = raw_player as Dictionary
+		var character_id: String = str(player.get("character_id", ""))
+		if character_id.is_empty():
+			continue
+		var player_name: String = str(player.get("name", "Player"))
+		var role: String = str(player.get("role", MvpConstants.ROLE_PLAYER))
+		var peer_id: int = int(player.get("peer_id", 0))
+		var label: String = "%s (%s)" % [player_name, role]
+		if peer_id == SessionState.local_peer_id:
+			label = "%s - self" % label
+		player_option.add_item(label)
+		var item_index: int = player_option.get_item_count() - 1
+		player_option.set_item_metadata(item_index, character_id)
+		if character_id == previous_character_id:
+			selected_index = item_index
+	if player_option.get_item_count() == 0:
+		player_option.add_item("No joined players")
+		player_option.set_item_metadata(0, "")
+		player_option.disabled = true
+		give_item_button.disabled = true
+		return
+	player_option.disabled = false
+	give_item_button.disabled = false
+	player_option.select(selected_index)
 
 
 func _on_spawn_mode_toggled(enabled: bool) -> void:
@@ -91,6 +183,39 @@ func _on_delete_selected_pressed() -> void:
 		set_status("Select actor first")
 		return
 	NetworkService.request_gm_delete_actors(actor_ids)
+
+
+func _on_player_option_pressed() -> void:
+	item_status_label.text = "Refreshing players..."
+	NetworkService.request_player_list()
+
+
+func _on_player_list_received(payload: Dictionary) -> void:
+	var raw_players: Variant = payload.get("players", [])
+	if raw_players is Array:
+		_populate_player_targets(raw_players as Array)
+	else:
+		_populate_player_targets([])
+	if player_option.disabled:
+		item_status_label.text = "No joined players"
+	elif item_status_label.text == "Refreshing players...":
+		item_status_label.text = "Select player, item and quantity"
+
+
+func _on_give_item_pressed() -> void:
+	var target_character_id: String = _selected_target_character_id()
+	if target_character_id.is_empty():
+		item_status_label.text = "Select player first"
+		return
+	var item_id: String = _selected_item_id()
+	var quantity: int = int(item_quantity.value)
+	if item_id.is_empty():
+		item_status_label.text = "Select item first"
+		return
+	if not NetworkService.request_gm_give_item_to_character(target_character_id, item_id, quantity):
+		item_status_label.text = "Could not send item request"
+		return
+	item_status_label.text = "Item request sent"
 
 
 func _on_npc_type_selected(_index: int) -> void:
@@ -173,3 +298,5 @@ func _on_system_message_received(payload: Dictionary) -> void:
 		GMToolState.clear_selected_actor()
 	if message.begins_with("Spawn") or message.begins_with("Delete"):
 		set_status(message)
+	if message.begins_with("Gave") or message.begins_with("Give item"):
+		item_status_label.text = message

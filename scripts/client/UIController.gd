@@ -16,9 +16,11 @@ var connect_panel: Node
 var chat_panel: Node
 var dice_panel: Node
 var character_panel: Node
+var inventory_panel: Node
 var character_list_panel: Node
 var create_character_panel: Node
 var character_button: Button
+var inventory_button: Button
 var encounter_panel: Node
 var gm_panel: Node
 var debug_status: Label
@@ -41,9 +43,11 @@ func bind_ui(root: Node) -> void:
 	chat_panel = root.get_node_or_null("ChatPanel")
 	dice_panel = root.get_node_or_null("DicePanel")
 	character_panel = root.get_node_or_null("CharacterSheetPanel")
+	inventory_panel = root.get_node_or_null("InventoryPanel")
 	character_list_panel = root.get_node_or_null("CharacterListPanel")
 	create_character_panel = root.get_node_or_null("CreateCharacterPanel")
 	character_button = root.get_node_or_null("CharacterButton") as Button
+	inventory_button = root.get_node_or_null("InventoryButton") as Button
 	encounter_panel = root.get_node_or_null("EncounterPanel")
 	gm_panel = root.get_node_or_null("GMPanel")
 	debug_status = root.get_node_or_null("DebugStatus") as Label
@@ -108,6 +112,8 @@ func _connect_ui_signals() -> void:
 	_connect_optional_signal(character_list_panel, "back_requested", "_on_character_select_back_requested")
 	if character_button and not character_button.pressed.is_connected(_on_character_button_pressed):
 		character_button.pressed.connect(_on_character_button_pressed)
+	if inventory_button and not inventory_button.pressed.is_connected(_on_inventory_button_pressed):
+		inventory_button.pressed.connect(_on_inventory_button_pressed)
 	if character_list_panel and character_list_panel.has_signal("create_requested"):
 		var create_callable := Callable(self, "_on_create_character_requested")
 		if not character_list_panel.is_connected("create_requested", create_callable):
@@ -161,6 +167,11 @@ func _set_ui_state(new_state: String) -> void:
 	if character_panel:
 		if not gameplay_like:
 			character_panel.visible = false
+	if inventory_button:
+		inventory_button.visible = gameplay_like
+	if inventory_panel:
+		if not gameplay_like:
+			inventory_panel.visible = false
 	if character_list_panel:
 		character_list_panel.visible = new_state == STATE_CHARACTER_SELECT
 	if create_character_panel:
@@ -324,18 +335,25 @@ func _on_character_button_pressed() -> void:
 	_toggle_character_panel()
 
 
+func _on_inventory_button_pressed() -> void:
+	_toggle_inventory_panel()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
 	var key_event: InputEventKey = event as InputEventKey
 	if not key_event.pressed or key_event.echo:
 		return
-	if key_event.keycode != KEY_C:
-		return
 	if _is_text_input_focused():
 		return
-	_toggle_character_panel()
-	get_viewport().set_input_as_handled()
+	match key_event.keycode:
+		KEY_C:
+			_toggle_character_panel()
+			get_viewport().set_input_as_handled()
+		KEY_I:
+			_toggle_inventory_panel()
+			get_viewport().set_input_as_handled()
 
 
 func _toggle_character_panel() -> void:
@@ -344,8 +362,22 @@ func _toggle_character_panel() -> void:
 	if ui_state != STATE_GAMEPLAY and ui_state != STATE_IN_ENCOUNTER:
 		return
 	character_panel.visible = not character_panel.visible
+	if character_panel.visible and inventory_panel:
+		inventory_panel.visible = false
 	if character_panel.visible and character_panel.has_method("refresh"):
 		character_panel.refresh()
+
+
+func _toggle_inventory_panel() -> void:
+	if not inventory_panel:
+		return
+	if ui_state != STATE_GAMEPLAY and ui_state != STATE_IN_ENCOUNTER:
+		return
+	inventory_panel.visible = not inventory_panel.visible
+	if inventory_panel.visible and character_panel:
+		character_panel.visible = false
+	if inventory_panel.visible and inventory_panel.has_method("refresh"):
+		inventory_panel.refresh()
 
 
 func _is_text_input_focused() -> bool:

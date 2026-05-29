@@ -1,0 +1,88 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/InventoryPanel.gd" id="1_script"]
+
+[node name="InventoryPanel" type="PanelContainer"]
+visible = false
+custom_minimum_size = Vector2(560, 380)
+offset_right = 560.0
+offset_bottom = 380.0
+script = ExtResource("1_script")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Inventory"
+
+[node name="Content" type="HBoxContainer" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
+
+[node name="LeftPane" type="VBoxContainer" parent="VBoxContainer/Content"]
+custom_minimum_size = Vector2(230, 0)
+layout_mode = 2
+
+[node name="ItemsTitle" type="Label" parent="VBoxContainer/Content/LeftPane"]
+layout_mode = 2
+text = "Items"
+
+[node name="EmptyLabel" type="Label" parent="VBoxContainer/Content/LeftPane"]
+layout_mode = 2
+text = "Empty"
+
+[node name="ItemsScroll" type="ScrollContainer" parent="VBoxContainer/Content/LeftPane"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="RowsContainer" type="VBoxContainer" parent="VBoxContainer/Content/LeftPane/ItemsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DetailsPane" type="VBoxContainer" parent="VBoxContainer/Content"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DetailsTitle" type="Label" parent="VBoxContainer/Content/DetailsPane"]
+layout_mode = 2
+text = "Details"
+
+[node name="DetailsLabel" type="Label" parent="VBoxContainer/Content/DetailsPane"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "No items"
+autowrap_mode = 2
+
+[node name="ActionsBar" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="UseButton" type="Button" parent="VBoxContainer/ActionsBar"]
+layout_mode = 2
+text = "Use"
+
+[node name="EquipButton" type="Button" parent="VBoxContainer/ActionsBar"]
+layout_mode = 2
+text = "Equip"
+
+[node name="UseOnButton" type="Button" parent="VBoxContainer/ActionsBar"]
+layout_mode = 2
+text = "Use On"
+
+[node name="DropButton" type="Button" parent="VBoxContainer/ActionsBar"]
+layout_mode = 2
+text = "Drop"
+
+[node name="BottomBar" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="TotalWeightLabel" type="Label" parent="VBoxContainer/BottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Total weight: 0.00"
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = ""
+autowrap_mode = 2

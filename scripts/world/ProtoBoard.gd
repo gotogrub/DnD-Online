@@ -6,7 +6,10 @@ signal tile_clicked(tile: Vector2i)
 
 @export var local_actor_debug_enabled := true
 @export var click_debug_enabled := true
+@export_file("*.json") var map_config_path := "res://data/maps/proto_world.json"
+@export var default_background_color := Color.BLACK
 
+@onready var map_background: Sprite2D = $MapBackground
 @onready var layer0: TileMapLayer = $Layer0
 @onready var layer1: TileMapLayer = $Layer1
 @onready var tokens: Node2D = $Tokens
@@ -15,6 +18,8 @@ var world_renderer: WorldRenderer
 
 
 func _ready() -> void:
+	RenderingServer.set_default_clear_color(default_background_color)
+	_apply_map_config()
 	TileRules.bind_board(self)
 	_setup_world_renderer()
 	if local_actor_debug_enabled and not SessionState.is_network_mode:
@@ -55,6 +60,85 @@ func get_tokens_root() -> Node2D:
 
 func get_world_renderer() -> WorldRenderer:
 	return world_renderer
+
+
+func _apply_map_config() -> void:
+	var config: Dictionary = _load_map_config()
+	if config.is_empty():
+		_apply_background({})
+		return
+	var map_id: String = str(config.get("map_id", MvpConstants.DEFAULT_MAP_ID)).strip_edges()
+	if not map_id.is_empty():
+		SessionState.map_id = map_id
+	var background_id: String = str(config.get("background_id", "black")).strip_edges().to_lower()
+	var backgrounds: Dictionary = _dictionary_from_variant(config.get("backgrounds", {}))
+	var background: Dictionary = {}
+	if backgrounds.has(background_id):
+		background = _dictionary_from_variant(backgrounds.get(background_id, {}))
+	_apply_background(background)
+
+
+func _load_map_config() -> Dictionary:
+	if map_config_path.is_empty() or not FileAccess.file_exists(map_config_path):
+		return {}
+	var file: FileAccess = FileAccess.open(map_config_path, FileAccess.READ)
+	if file == null:
+		push_warning("Could not read map config: %s" % map_config_path)
+		return {}
+	var parsed_data: Variant = JSON.parse_string(file.get_as_text())
+	if parsed_data is Dictionary:
+		return (parsed_data as Dictionary).duplicate(true)
+	push_warning("Map config is not a dictionary: %s" % map_config_path)
+	return {}
+
+
+func _apply_background(background: Dictionary) -> void:
+	var background_color: Color = Color.from_string(str(background.get("color", "#000000")), default_background_color)
+	RenderingServer.set_default_clear_color(background_color)
+	if not map_background:
+		return
+	var texture_path: String = str(background.get("texture", "")).strip_edges()
+	if texture_path.is_empty() or not ResourceLoader.exists(texture_path):
+		map_background.texture = null
+		map_background.visible = false
+		return
+	var texture: Texture2D = load(texture_path) as Texture2D
+	if texture == null:
+		map_background.texture = null
+		map_background.visible = false
+		return
+	map_background.texture = texture
+	map_background.visible = true
+	map_background.position = _vector2_from_variant(background.get("position", map_background.position), map_background.position)
+	var scale_value: Variant = background.get("scale", map_background.scale)
+	if scale_value is int or scale_value is float:
+		var uniform_scale: float = float(scale_value)
+		map_background.scale = Vector2(uniform_scale, uniform_scale)
+	else:
+		map_background.scale = _vector2_from_variant(scale_value, map_background.scale)
+	map_background.modulate.a = clampf(float(background.get("opacity", 1.0)), 0.0, 1.0)
+
+
+func _dictionary_from_variant(value: Variant) -> Dictionary:
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
+
+
+func _vector2_from_variant(value: Variant, fallback: Vector2) -> Vector2:
+	if value is Vector2:
+		return value
+	if value is Vector2i:
+		var vector_value: Vector2i = value
+		return Vector2(vector_value.x, vector_value.y)
+	if value is Dictionary:
+		var dictionary_value: Dictionary = value
+		return Vector2(float(dictionary_value.get("x", fallback.x)), float(dictionary_value.get("y", fallback.y)))
+	if value is Array:
+		var array_value: Array = value
+		if array_value.size() >= 2:
+			return Vector2(float(array_value[0]), float(array_value[1]))
+	return fallback
 
 
 func _handle_click_actor_debug(world_pos: Vector2, additive_select := false) -> void:

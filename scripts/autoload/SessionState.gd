@@ -11,6 +11,7 @@ signal chat_message_added(message: Dictionary)
 signal encounter_changed(encounter_state: Dictionary)
 signal local_character_changed(character: Dictionary)
 signal character_list_changed(payload: Dictionary)
+signal local_inventory_changed(inventory: Dictionary)
 
 var players := {}
 var actors := {}
@@ -22,6 +23,7 @@ var local_player_id := ""
 var local_owner_key := ""
 var local_character_id := ""
 var local_character: Dictionary = {}
+var local_inventory: Dictionary = {}
 var local_role := ""
 var local_actor_id := ""
 var is_network_mode := false
@@ -48,6 +50,7 @@ func reset_all() -> void:
 	local_owner_key = ""
 	local_character_id = ""
 	local_character.clear()
+	local_inventory.clear()
 	local_role = ""
 	local_actor_id = ""
 	is_network_mode = false
@@ -59,6 +62,7 @@ func reset_all() -> void:
 	encounter = _default_encounter()
 	actors_changed.emit()
 	local_character_changed.emit({})
+	local_inventory_changed.emit({})
 	character_list_changed.emit({})
 	state_changed.emit()
 
@@ -75,6 +79,7 @@ func reset_local_debug_state() -> void:
 		local_owner_key = ""
 		local_character_id = ""
 		local_character.clear()
+		local_inventory.clear()
 		local_role = ""
 		local_actor_id = ""
 		is_joined = false
@@ -83,6 +88,7 @@ func reset_local_debug_state() -> void:
 	actors_changed.emit()
 	if not is_network_mode:
 		local_character_changed.emit({})
+		local_inventory_changed.emit({})
 		character_list_changed.emit({})
 	state_changed.emit()
 
@@ -118,12 +124,29 @@ func set_local_character(character: Dictionary) -> void:
 	local_character = character.duplicate(true)
 	local_character_id = str(local_character.get("character_id", local_character_id))
 	local_owner_key = str(local_character.get("owner_key", local_owner_key))
+	var raw_inventory: Variant = local_character.get("inventory", {})
+	if raw_inventory is Dictionary:
+		set_local_inventory(raw_inventory as Dictionary)
 	local_character_changed.emit(local_character.duplicate(true))
 	state_changed.emit()
 
 
 func get_local_character() -> Dictionary:
 	return local_character.duplicate(true)
+
+
+func set_local_inventory(payload: Dictionary) -> void:
+	local_inventory = {
+		"character_id": str(payload.get("character_id", local_character_id)),
+		"items": _array_from_variant(payload.get("items", [])),
+		"equipped": _dictionary_from_variant(payload.get("equipped", {})),
+	}
+	local_inventory_changed.emit(local_inventory.duplicate(true))
+	state_changed.emit()
+
+
+func get_local_inventory() -> Dictionary:
+	return local_inventory.duplicate(true)
 
 
 func set_character_list(payload: Dictionary) -> void:
@@ -335,6 +358,18 @@ func _default_encounter() -> Dictionary:
 		"initiative": [],
 		"current_actor_id": "",
 	}
+
+
+func _array_from_variant(value: Variant) -> Array:
+	if value is Array:
+		return (value as Array).duplicate(true)
+	return []
+
+
+func _dictionary_from_variant(value: Variant) -> Dictionary:
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
 
 
 func _resolve_actor_sprite(kind: String, sprite: String) -> String:
